@@ -1,0 +1,12 @@
+_commit: v0.1.0
+_src_path: /home/dk/code/Quantilica/fetcher-template
+author_email: daniel@dkko.me
+author_name: Komesu, D.K.
+description: Coletor e conversor Lake Hive de dados abertos da ANTT
+domain: transportes
+has_lake: true
+package_name: antt-fetcher
+package_slug: antt_fetcher
+protocol: ckan
+source_id: antt
+source_name: Agência Nacional de Transportes Terrestres (ANTT)

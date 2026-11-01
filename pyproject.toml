@@ -1,0 +1,79 @@
+[project]
+name = "antt-fetcher"
+version = "0.1.0"
+description = "Coletor e conversor Lake Hive de dados abertos da ANTT"
+readme = "README.md"
+authors = [
+    { name = "Komesu, D.K.", email = "daniel@dkko.me" },
+]
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.12"
+keywords = ["antt", "quantilica", "dados-abertos", "lake", "brazil"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Information Technology",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Utilities",
+    "Typing :: Typed",
+]
+dependencies = [
+    "quantilica-core>=0.15.0",
+]
+
+[project.optional-dependencies]
+analysis = [
+    "polars>=1.0.0",
+    "quantilica-analytics>=0.7.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/Quantilica/antt-fetcher"
+Repository = "https://github.com/Quantilica/antt-fetcher"
+Issues = "https://github.com/Quantilica/antt-fetcher/issues"
+
+[project.scripts]
+antt-fetcher = "antt_fetcher.cli:main"
+
+[project.entry-points."quantilica.fetchers"]
+antt = "antt_fetcher.plugin:app"
+
+
+[project.entry-points."quantilica.lake"]
+antt = "antt_fetcher.lake:converter"
+
+
+[dependency-groups]
+dev = [
+    "ruff>=0.9.0",
+    "pytest>=8.0.0",
+    "pytest-cov",
+    "quantilica-cli>=0.14.0",
+    "typer>=0.15.0",
+    "rich>=13.0.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = ["-p", "no:cacheprovider"]
+
+[tool.ruff]
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/antt_fetcher"]
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
