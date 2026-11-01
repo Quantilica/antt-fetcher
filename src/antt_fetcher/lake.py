@@ -133,11 +133,11 @@ class AnttLakeConverter:
 
                 writer = writers[ds_id]
                 try:
-                    # Detect encoding: try latin-1, then utf-8
+                    # Detect encoding: try utf-8 first, fallback to latin-1
                     try:
-                        text = data_bytes.decode("latin-1")
+                        text = data_bytes.decode("utf-8-sig")
                     except UnicodeDecodeError:
-                        text = data_bytes.decode("utf-8-sig", errors="replace")
+                        text = data_bytes.decode("latin-1", errors="replace")
 
                     sep = ";" if ";" in text[:2000] else ","
 

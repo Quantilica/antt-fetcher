@@ -72,3 +72,28 @@ def test_convert_volume_pedagio_and_acidentes(tmp_path: Path) -> None:
     errors_acidentes = check_dataset(ds_acidentes)
     assert not errors_acidentes, f"check_dataset acidentes: {errors_acidentes}"
     assert (ds_acidentes / "ano=2024").is_dir()
+
+
+def test_convert_antt_utf8_encoding(tmp_path: Path) -> None:
+    """Test converting ANTT CSV encoded in UTF-8 preserves accents without mojibake."""
+    raw_dir = tmp_path / "raw" / "rodovias"
+    raw_dir.mkdir(parents=True)
+    lake_dir = tmp_path / "lake"
+    lake_dir.mkdir()
+
+    csv_utf8 = (
+        "concessionaria;mes_ano;sentido;volume_total\n"
+        "RODOVIA DOS TAMOIOS - LITORAL NORTE;10/2024;SÃO PAULO;25000\n"
+    )
+    (raw_dir / "volume_pedagio_2024@20261101.csv").write_text(
+        csv_utf8, encoding="utf-8"
+    )
+
+    res = converter.convert(raw_dir.parent, lake_dir)
+    assert res.converted == 1
+    assert not res.errors
+
+    ds = lake_dir / "antt" / "volume-trafego-praca-pedagio" / "ano=2024"
+    df = pl.read_parquet(list(ds.glob("*.parquet"))[0])
+    assert df["sentido"][0] == "SÃO PAULO"
+    assert df["concessionaria"][0] == "RODOVIA DOS TAMOIOS - LITORAL NORTE"
