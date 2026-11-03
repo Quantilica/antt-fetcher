@@ -34,28 +34,30 @@ class DataRepository(BaseDataRepository):
         quarter = entry.get("quarter")
         slug = entry.get("slug")
 
+        timestamp = last_modified or dt.date.today()
+
         if year is None:
-            filename = stamp_filename(base_id, ext, last_modified)
+            filename = stamp_filename(base_id, ext, timestamp)
         elif month is not None:
             partition = f"{year}-{month:02d}"
             if slug:
                 partition = f"{partition}_{slug}"
             filename = build_stamped_filename(
-                base_id, partition, ext=ext, timestamp=last_modified
+                base_id, partition, ext=ext, timestamp=timestamp
             )
         elif quarter is not None:
             partition = f"{year}-T{quarter:02d}"
             if slug:
                 partition = f"{partition}_{slug}"
             filename = build_stamped_filename(
-                base_id, partition, ext=ext, timestamp=last_modified
+                base_id, partition, ext=ext, timestamp=timestamp
             )
         else:
             partition = str(year)
             if slug:
                 partition = f"{partition}_{slug}"
             filename = build_stamped_filename(
-                base_id, partition, ext=ext, timestamp=last_modified
+                base_id, partition, ext=ext, timestamp=timestamp
             )
 
         return self.storage.path_for(f"{group}/{filename}")

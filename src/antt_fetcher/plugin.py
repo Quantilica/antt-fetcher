@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from quantilica.cli.sdk import FetcherApp, make_resolve_groups
+from quantilica.core.sync import FreshnessPolicy
 
 from .catalog import GROUP_ALIASES, GROUPS, list_datasets
 from .storage import DataRepository
@@ -31,6 +32,7 @@ fetcher = FetcherApp(
     list_datasets=list_datasets,
     path_builder=path_builder,
     default_output=Path("/data/antt"),
+    freshness_policy=FreshnessPolicy.REMOTE_ONLY,
 )
 
 
