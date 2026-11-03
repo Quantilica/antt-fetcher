@@ -97,3 +97,99 @@ def test_convert_antt_utf8_encoding(tmp_path: Path) -> None:
     df = pl.read_parquet(list(ds.glob("*.parquet"))[0])
     assert df["sentido"][0] == "SÃO PAULO"
     assert df["concessionaria"][0] == "RODOVIA DOS TAMOIOS - LITORAL NORTE"
+
+
+def _partitions(ds_dir: Path) -> dict[str, int]:
+    """Linhas por diretório de partição ``ano=...``."""
+    return {
+        d.name: sum(pl.read_parquet(f).height for f in d.glob("*.parquet"))
+        for d in sorted(ds_dir.glob("ano=*"))
+    }
+
+
+def test_multi_year_csv_is_split_per_row(tmp_path: Path) -> None:
+    """Regressão A4: CSV multi-ano ia inteiro para a partição da 1ª linha."""
+    raw_dir = tmp_path / "raw" / "rodovias"
+    raw_dir.mkdir(parents=True)
+    csv = (
+        "data;tipo_de_ocorrencia;km\n"
+        "12/05/2019;COLISAO;1\n03/01/2020;TOMBAMENTO;2\n"
+        "30/12/2020;COLISAO;3\n01/02/2021;INCENDIO;4\n"
+    )
+    (raw_dir / "acidentes_rodovias@20261101.csv").write_text(csv, "utf-8")
+
+    res = converter.convert(raw_dir.parent, tmp_path / "lake")
+    assert not res.errors
+    assert res.converted == 3
+    ds = tmp_path / "lake" / "antt" / "acidentes-rodovias"
+    assert not check_dataset(ds)
+    assert _partitions(ds) == {"ano=2019": 1, "ano=2020": 2, "ano=2021": 1}
+
+
+def test_row_without_valid_year_goes_to_quarantine(tmp_path: Path, caplog) -> None:
+    """Sem fallback silencioso 2024: linha sem ano vai para a quarentena."""
+    raw_dir = tmp_path / "raw" / "rodovias"
+    raw_dir.mkdir(parents=True)
+    csv = "data;km\n12/05/2019;1\n;2\nlixo;3\n"
+    (raw_dir / "acidentes_rodovias@20261101.csv").write_text(csv, "utf-8")
+
+    with caplog.at_level("WARNING"):
+        res = converter.convert(raw_dir.parent, tmp_path / "lake")
+    assert not res.errors
+    parts = _partitions(tmp_path / "lake" / "antt" / "acidentes-rodovias")
+    assert parts["ano=2019"] == 1
+    assert parts["ano=__HIVE_DEFAULT_PARTITION__"] == 2
+    assert "2 linha(s) sem ano valido" in caplog.text
+
+
+def test_no_year_anywhere_is_an_error_not_2024(tmp_path: Path) -> None:
+    raw_dir = tmp_path / "raw" / "rodovias"
+    raw_dir.mkdir(parents=True)
+    (raw_dir / "acidentes_rodovias@20261101.csv").write_text(
+        "tipo;km\nCOLISAO;1\n", "utf-8"
+    )
+    res = converter.convert(raw_dir.parent, tmp_path / "lake")
+    assert res.converted == 0
+    assert len(res.errors) == 1
+    assert not list((tmp_path / "lake").rglob("ano=*"))
+
+
+def test_rntrc_snapshot_partitions_by_declared_period(tmp_path: Path) -> None:
+    """RNTRC é retrato mensal: o ano vem do nome, não da data de cadastro."""
+    raw_dir = tmp_path / "raw" / "cargas"
+    raw_dir.mkdir(parents=True)
+    csv = "nome_transportador;data;cep\nA;15/03/1998;01000\nB;02/07/2011;02000\n"
+    (raw_dir / "transportadores_rntrc_12_2024@20261101.csv").write_text(csv, "utf-8")
+
+    res = converter.convert(raw_dir.parent, tmp_path / "lake")
+    assert not res.errors
+    assert _partitions(tmp_path / "lake" / "antt" / "rntrc") == {"ano=2024": 2}
+
+
+def test_zip_with_multiple_members_writes_all(tmp_path: Path) -> None:
+    """Cada membro do ZIP é origem própria (o sha256 do ZIP é o mesmo)."""
+    raw_dir = tmp_path / "raw" / "rodovias"
+    raw_dir.mkdir(parents=True)
+    with zipfile.ZipFile(raw_dir / "acidentes@20261101.zip", "w") as zf:
+        zf.writestr(
+            "acidentes_rodovias_2022.csv", "data;km\n01/01/2022;1\n01/02/2022;2\n"
+        )
+        zf.writestr("acidentes_rodovias_2023.csv", "data;km\n01/01/2023;3\n")
+    res = converter.convert(raw_dir.parent, tmp_path / "lake")
+    assert not res.errors
+    ds = tmp_path / "lake" / "antt" / "acidentes-rodovias"
+    assert _partitions(ds) == {"ano=2022": 2, "ano=2023": 1}
+
+
+def test_latin1_decodes_and_reconversion_is_idempotent(tmp_path: Path) -> None:
+    raw_dir = tmp_path / "raw" / "rodovias"
+    raw_dir.mkdir(parents=True)
+    (raw_dir / "acidentes_rodovias@20261101.csv").write_bytes(
+        "data;local\n01/01/2020;SÃO JOSÉ\n01/01/2021;AÇAÍ\n".encode("latin-1")
+    )
+    converter.convert(raw_dir.parent, tmp_path / "lake")
+    p = tmp_path / "lake" / "antt" / "acidentes-rodovias" / "ano=2020"
+    assert pl.read_parquet(next(p.glob("*.parquet")))["local"][0] == "SÃO JOSÉ"
+    res = converter.convert(raw_dir.parent, tmp_path / "lake")
+    assert res.converted == 0
+    assert res.skipped == 2
