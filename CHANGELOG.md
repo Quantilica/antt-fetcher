@@ -8,6 +8,7 @@ e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR
 ## [Não lançado]
 
 ### Corrigido
+- Política de frescor volta a F2 (`HEAD_FALLBACK_GET`): `REMOTE_ONLY` (F3, para fontes sem validadores) causava re-download diário de fontes com Last-Modified/ETag, porque descartava o Last-Modified e o nome do arquivo caía em `@hoje`.
 - Aliases de grupo (`sync padrao` etc.): o `FetcherApp` recebia `alias -> str` e o
   SDK fazia `list("teses")`, resolvendo para `['t', 'e', 's', ...]` ("Grupo
   desconhecido: 't'"). O plugin agora passa `alias -> [grupo]`.
