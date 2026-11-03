@@ -25,6 +25,4 @@ DATASETS_BY_GROUP: dict[str, list[str]] = {
     "fiscalizacao": [],
 }
 
-R1_DATASETS = [
-    slug for slugs in DATASETS_BY_GROUP.values() for slug in slugs
-]
+R1_DATASETS = [slug for slugs in DATASETS_BY_GROUP.values() for slug in slugs]

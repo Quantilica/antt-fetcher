@@ -37,8 +37,13 @@ def fake_ckan(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         catalog,
         "DATASETS_BY_GROUP",
-        {"rodovias": list(FAKE_RESOURCES), "cargas": [], "passageiros": [],
-         "ferrovias": [], "fiscalizacao": []},
+        {
+            "rodovias": list(FAKE_RESOURCES),
+            "cargas": [],
+            "passageiros": [],
+            "ferrovias": [],
+            "fiscalizacao": [],
+        },
         raising=False,
     )
     monkeypatch.setattr(
