@@ -22,7 +22,7 @@ DATASETS_BY_GROUP: dict[str, list[str]] = {
     "cargas": ["rntrc"],
     "passageiros": ["monitriip-servico-regular-paradas"],
     "ferrovias": ["relatorio-de-acompanhamento-de-acidentes-ferroviarios-raaf"],
-    "fiscalizacao": ["sismultas-autos-de-infracao-lavrados"],
+    "fiscalizacao": [],
 }
 
 R1_DATASETS = [
