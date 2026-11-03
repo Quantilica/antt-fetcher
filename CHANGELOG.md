@@ -8,6 +8,9 @@ e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR
 ## [Não lançado]
 
 ### Corrigido
+- Aliases de grupo (`sync padrao` etc.): o `FetcherApp` recebia `alias -> str` e o
+  SDK fazia `list("teses")`, resolvendo para `['t', 'e', 's', ...]` ("Grupo
+  desconhecido: 't'"). O plugin agora passa `alias -> [grupo]`.
 - `lake`: a partição `ano` agora é por linha (coluna de data do conjunto), não o
   ano da primeira linha do arquivo; CSV multi-ano gera uma partição por ano.
   Linha sem ano válido vai para `ano=__HIVE_DEFAULT_PARTITION__` com aviso de

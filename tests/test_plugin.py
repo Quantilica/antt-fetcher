@@ -49,3 +49,13 @@ def test_cli_convert_help() -> None:
     result = runner.invoke(app, ["convert", "--help"])
     assert result.exit_code == 0
     assert "--lake" in result.output
+
+
+def test_aliases_resolve_to_group_not_characters() -> None:
+    """Regressão: alias string virava lista de caracteres no FetcherApp."""
+    from antt_fetcher.catalog import GROUP_ALIASES, GROUPS
+    from antt_fetcher.plugin import fetcher
+
+    for alias, canon in GROUP_ALIASES.items():
+        assert fetcher.resolve_groups([alias]) == [canon]
+        assert canon in GROUPS
