@@ -74,3 +74,29 @@ def test_list_datasets_por_grupo_e_alias() -> None:
         assert isinstance(list_datasets(alias), list)
     with pytest.raises(ValueError, match="Grupo desconhecido"):
         list_datasets("grupo_inexistente_xyz")
+
+
+def test_ids_longos_nao_colidem(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Regressão: id truncado em 80 caracteres perdia o ano e colidia."""
+    slug = "sifama-autos-de-infracao-passageiros"
+    resources = [
+        {
+            "id": f"res-{ano}",
+            "name": f"SIFAMA - Autos de Infração de Passageiros {ano}",
+            "format": "CSV",
+            "url": f"https://x/sifama_{ano}.csv",
+        }
+        for ano in (2021, 2022, 2023)
+    ]
+    monkeypatch.setattr(catalog, "_CACHE", {})
+    monkeypatch.setattr(
+        catalog, "DATASETS_BY_GROUP", {"fiscalizacao": [slug]}, raising=False
+    )
+    monkeypatch.setattr(
+        catalog.AnttClient,
+        "package_show",
+        lambda self, package_id: {"resources": resources},
+    )
+    ids = [e["id"] for e in list_datasets("fiscalizacao")]
+    assert len(ids) == 3
+    assert len(set(ids)) == 3

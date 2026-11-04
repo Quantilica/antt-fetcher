@@ -57,5 +57,5 @@ def test_aliases_resolve_to_group_not_characters() -> None:
     from antt_fetcher.plugin import fetcher
 
     for alias, canon in GROUP_ALIASES.items():
-        assert fetcher.resolve_groups([alias]) == [canon]
-        assert canon in GROUPS
+        assert fetcher.resolve_groups([alias]) == canon
+        assert all(group in GROUPS for group in canon)

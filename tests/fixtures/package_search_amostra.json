@@ -1,0 +1,203 @@
+{
+ "packages": [
+  {
+   "name": "posto-pesagem-veicular",
+   "title": "Operação dos Postos de Pesagem Veicular",
+   "groups": [
+    {
+     "name": "fiscalizacao"
+    }
+   ],
+   "resources": [
+    {
+     "name": "OPERACAO_PPV-2025_12",
+     "format": "CSV",
+     "url": "https://dados.antt.gov.br/dataset/87129a70-c708-4ed4-ba97-921a13879bdc/resource/b84fba20-d138-484f-bacd-8dbd9b0f0faa/download/operacao_ppv-2025_12.csv",
+     "size": 50756
+    },
+    {
+     "name": "MEDIDA_ADM-2025_12",
+     "format": "CSV",
+     "url": "https://dados.antt.gov.br/dataset/87129a70-c708-4ed4-ba97-921a13879bdc/resource/f65ffbbf-3ac2-4fc1-8278-57cda3fec7b9/download/medida_adm-2025_12.csv",
+     "size": 36110
+    },
+    {
+     "name": "OPERACAO_PPV-2025_12",
+     "format": "JSON",
+     "url": "https://dados.antt.gov.br/dataset/87129a70-c708-4ed4-ba97-921a13879bdc/resource/e2cf99e4-fa94-40f8-a1ed-e54102336bb2/download/operacao_ppv-2025_12.json",
+     "size": 145864
+    },
+    {
+     "name": "Dicionário de dados - OPERACAO_PPV",
+     "format": "PDF",
+     "url": "https://dados.antt.gov.br/dataset/87129a70-c708-4ed4-ba97-921a13879bdc/resource/77ec6932-5299-4e2b-af09-4fdb494eefba/download/dicionrio-de-dados-operacao_ppv.pdf",
+     "size": 505134
+    }
+   ]
+  },
+  {
+   "name": "pontes-similares",
+   "title": "Pontes e similares",
+   "groups": [
+    {
+     "name": "rodovias"
+    }
+   ],
+   "resources": [
+    {
+     "name": "Pontes e similares das Rodovias Concedidas",
+     "format": "PDF",
+     "url": "https://dados.antt.gov.br/dataset/f9cdb7dc-549f-4bd3-97aa-a35bdff94c26/resource/86137c00-635c-4658-a136-e3543137a7d0/download/dicionario-de-dados-pontes-e-similares.pdf",
+     "size": 70511
+    }
+   ]
+  },
+  {
+   "name": "rntrc",
+   "title": "Registro Nacional de Transportadores Rodoviários de Cargas - RNTRC",
+   "groups": [
+    {
+     "name": "cargas"
+    }
+   ],
+   "resources": [
+    {
+     "name": "Ago20 - RNTRC",
+     "format": "CSV",
+     "url": "https://dados.antt.gov.br/dataset/b4a055d1-97a2-46f1-9461-cb17fbc6b6b3/resource/ffd82469-0601-461d-890e-bdf023f87a9d/download/transportadores_rntrc_08_2020.csv",
+     "size": 59434668
+    },
+    {
+     "name": "Set20 - RNTRC",
+     "format": "CSV",
+     "url": "https://dados.antt.gov.br/dataset/b4a055d1-97a2-46f1-9461-cb17fbc6b6b3/resource/2b14f64d-e684-40a5-b275-23644c624f8c/download/transportadores_rntrc_09_2020.csv",
+     "size": 60307379
+    },
+    {
+     "name": "Dicionário de Dados - RNTRC",
+     "format": "PDF",
+     "url": "https://dados.antt.gov.br/dataset/b4a055d1-97a2-46f1-9461-cb17fbc6b6b3/resource/644f044e-9c9d-4a12-b741-da65c00e67a9/download/dicionario_dados_rntrc.pdf",
+     "size": 521056
+    }
+   ]
+  },
+  {
+   "name": "sifama-autos-de-infracao-cargas",
+   "title": "SIFAMA - Autos de Infração de Transporte Rodoviário de Cargas",
+   "groups": [
+    {
+     "name": "fiscalizacao"
+    }
+   ],
+   "resources": [
+    {
+     "name": "SIFAMA - Autos de Infração de Cargas 2023",
+     "format": "CSV",
+     "url": "https://dados.antt.gov.br/dataset/79504ae7-138c-4d15-ac9c-2f39840167f0/resource/ed01930a-c970-4bdd-bafa-df277aa24956/download/sifama_autos_de_infracao_de_cargas_2023.csv",
+     "size": 456848
+    },
+    {
+     "name": "SIFAMA - Autos de Infração de Cargas 2022",
+     "format": "CSV",
+     "url": "https://dados.antt.gov.br/dataset/79504ae7-138c-4d15-ac9c-2f39840167f0/resource/7c5d2a0d-4044-4953-8396-3bf20edd2a1c/download/sifama_autos_de_infracao_de_cargas_2022.csv",
+     "size": 811953
+    },
+    {
+     "name": "SIFAMA - Autos de Infração de Cargas 2023",
+     "format": "JSON",
+     "url": "https://dados.antt.gov.br/dataset/79504ae7-138c-4d15-ac9c-2f39840167f0/resource/58f460e0-2b24-42cb-b9c5-f7e93a1ecd6c/download/sifama_autos_de_infracao_de_cargas_2023.json",
+     "size": 663846
+    },
+    {
+     "name": "Dicionário de Dados - SIFAMA Autos de Infração de Cargas",
+     "format": "PDF",
+     "url": "https://dados.antt.gov.br/dataset/79504ae7-138c-4d15-ac9c-2f39840167f0/resource/0bd27fc5-25c3-4ece-bd8a-2e9003c8a0c6/download/sifama_autos_de_infracao_de_cargas_dicionario_dados.pdf",
+     "size": 608220
+    }
+   ]
+  },
+  {
+   "name": "volume-trafego-praca-pedagio",
+   "title": "Volume de Tráfego nas Praças de Pedágio",
+   "groups": [
+    {
+     "name": "rodovias"
+    }
+   ],
+   "resources": [
+    {
+     "name": "Volume de Tráfego por Praça - Concessionárias 2010",
+     "format": "CSV",
+     "url": "https://dados.antt.gov.br/dataset/5bf70ec3-b24e-4f73-99a0-78b200f5e915/resource/4c1c6cde-61a3-4704-9b01-4bb6e75b874d/download/volume-trafego-praca-pedagio-2010.csv",
+     "size": 1420258
+    },
+    {
+     "name": "Volume de Tráfego por Praça - Concessionárias 2011",
+     "format": "CSV",
+     "url": "https://dados.antt.gov.br/dataset/5bf70ec3-b24e-4f73-99a0-78b200f5e915/resource/2c1f7d1f-2fd4-451d-bddf-590e0d5d41ba/download/volume-trafego-praca-pedagio-2011.csv",
+     "size": 1444791
+    },
+    {
+     "name": "Volume de Tráfego por Praça - Concessionárias 2010",
+     "format": "JSON",
+     "url": "https://dados.antt.gov.br/dataset/5bf70ec3-b24e-4f73-99a0-78b200f5e915/resource/16106e9d-5cdf-433a-a321-9732d2d0d3b0/download/volume-trafego-praca-pedagio-2010.json",
+     "size": 2930322
+    },
+    {
+     "name": "Dicionário de Dados - Volume de Tráfego por Praça",
+     "format": "PDF",
+     "url": "https://dados.antt.gov.br/dataset/5bf70ec3-b24e-4f73-99a0-78b200f5e915/resource/5cec4e90-24d4-4a43-84e1-121a422bbcd5/download/dicionario_dados_surod_volume-de-trafego-nas-pracas-de-pedagio.pdf",
+     "size": 144471
+    }
+   ]
+  },
+  {
+   "name": "infraestrutura-rodoviaria",
+   "title": "Infraestrutura Rodoviária",
+   "groups": [
+    {
+     "name": "visualizacoes-graficas"
+    }
+   ],
+   "resources": [
+    {
+     "name": "Rodovias - Visualização Gráfica (Dashboard)",
+     "format": "HTML",
+     "url": "https://app.powerbi.com/view?r=eyJrIjoiMTUzOTc1ZWMtZGU3YS00NDE1LTg4OGItODMxYzMwMzQ2YTU2IiwidCI6Ijg3YmJlOWRlLWE4OTItNGNkZS1hNDY2LTg4Zjk4MmZiYzQ5MCJ9",
+     "size": null
+    }
+   ]
+  },
+  {
+   "name": "gerenciamento-de-autorizacoes-2021-2024",
+   "title": "Gerenciamento de Autorizações 2021-2024",
+   "groups": [],
+   "resources": [
+    {
+     "name": "Ago21 - Empresas, Linhas e Seções",
+     "format": "CSV",
+     "url": "https://dados.antt.gov.br/dataset/a272f5cf-9cf6-4011-bf29-6a37b8ce8a8a/resource/6753e0fb-e36e-4ce8-902f-1b289cb51812/download/linhas_secoes_08_2021.csv",
+     "size": 37178385
+    },
+    {
+     "name": "Ago21 - Horários",
+     "format": "CSV",
+     "url": "https://dados.antt.gov.br/dataset/a272f5cf-9cf6-4011-bf29-6a37b8ce8a8a/resource/c4f20c93-5cce-4816-98d1-964e59cd15da/download/horarios_08_2021.csv",
+     "size": 1796950
+    },
+    {
+     "name": "Ago21 - Empresas, Linhas e Seções",
+     "format": "JSON",
+     "url": "https://dados.antt.gov.br/dataset/a272f5cf-9cf6-4011-bf29-6a37b8ce8a8a/resource/064015dc-aba8-475a-bc2c-063d529aa920/download/linhas_secoes_08_2021.json",
+     "size": 82873363
+    },
+    {
+     "name": "Dicionário de Dados - Horários",
+     "format": "PDF",
+     "url": "https://dados.antt.gov.br/dataset/a272f5cf-9cf6-4011-bf29-6a37b8ce8a8a/resource/a73a2248-5388-40c8-a113-3b5e7ac9201b/download/horarios_dicionario_dados.pdf",
+     "size": 620398
+    }
+   ]
+  }
+ ]
+}

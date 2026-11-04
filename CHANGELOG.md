@@ -7,6 +7,18 @@ e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR
 
 ## [Não lançado]
 
+### Adicionado
+- Catálogo completo por domínio (`catalog_<dominio>.py`, 9 grupos): os 106 pacotes do CKAN (2026-11-03) mais o conjunto `govbr`, com `tier` (`r1` baixa hoje; `listed` = listado, download em release futura). R1 passa de 5 para 35 pacotes do CKAN (+ o XLSX do gov.br); `fiscalizacao` deixa de ser vazia (8 pacotes, 5 em R1) e entram `ouvidoria`, `tecnologia`, `visualizacoes` e `govbr`.
+- `govbr`: produção ferroviária origem-destino (XLSX de 9,1 MB). O nome do arquivo muda a cada mês, então a URL é resolvida pela página; o gov.br recusa HEAD (403) mas aceita GET com Range.
+- `MACRO_ALIASES` (`infraestrutura`, `transporte-rodoviario`, `gestao`); `GROUP_ALIASES` agora mapeia para listas.
+- `quantilica antt catalogo [grupo] [--tier]` e `quantilica antt discover [--json] [--fail-on-change]` (`antt_fetcher.discover.discover()`): pacotes novos, removidos na fonte (bruto mantido) e crescidos; resposta vazia/WAF vira erro, nunca "tudo removido".
+- O `lake` continua convertendo só os 5 conjuntos originais; os demais R1 ficam como bruto.
+
+### Corrigido
+- Ids de entrada truncados em 80 caracteres perdiam o ano e colidiam (ex.: `sifama-autos-de-infracao-passageiros` gerava 1 id para 9 arquivos); o sufixo agora vem depois do corte.
+- `pick_package_resources` agrupava por `name` do CKAN e fundia arquivos distintos com o mesmo nome (`radar`, `trecho-concedido`, `sat`...); agora agrupa pelo arquivo da URL, preferindo CSV a JSON e o maior `size`.
+- Pacote removido do CKAN deixa de derrubar o grupo inteiro no `list`.
+
 ### Corrigido
 - Política de frescor volta a F2 (`HEAD_FALLBACK_GET`): `REMOTE_ONLY` (F3, para fontes sem validadores) causava re-download diário de fontes com Last-Modified/ETag, porque descartava o Last-Modified e o nome do arquivo caía em `@hoje`.
 - Aliases de grupo (`sync padrao` etc.): o `FetcherApp` recebia `alias -> str` e o
