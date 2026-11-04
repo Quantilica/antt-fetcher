@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import codecs
+import json
 import logging
 import os
 import re
@@ -30,6 +31,8 @@ except ImportError as exc:
         "--index https://index.quantilica.com/simple/"
     ) from exc
 
+from antt_fetcher.catalog import CATALOG  # noqa: E402
+
 logger = logging.getLogger(__name__)
 
 SOURCE_ID = "antt"
@@ -40,13 +43,6 @@ DATASETS = [
     "monitriip-servico-regular-paradas",
     "relatorio-acompanhamento-acidentes-ferroviarios-raaf",
 ]
-
-
-def _norm_col(col_name: str) -> str:
-    cleaned = col_name.strip()
-    s = unicodedata.normalize("NFKD", cleaned)
-    s = s.encode("ascii", "ignore").decode("ascii")
-    return re.sub(r"[^a-z0-9]+", "_", s.lower()).strip("_")
 
 
 def _norm_col(col_name: str) -> str:
@@ -144,13 +140,6 @@ def _detect_separator(csv_path: Path) -> str:
     return ";" if ";" in header else ","
 
 
-def _detect_separator(csv_path: Path) -> str:
-    """``;`` se o cabecalho (primeira linha) o contem, senao ``,``."""
-    with open(csv_path, encoding="utf-8", newline="") as fh:
-        header = fh.readline()
-    return ";" if ";" in header else ","
-
-
 # Colunas com data/ano do registro, em ordem de preferencia, por conjunto. A
 # particao ``ano`` vem da linha, nao do arquivo. Conjuntos ausentes daqui (ou com
 # lista vazia) sao fotografias: o ano vem so do periodo declarado no nome do
@@ -159,7 +148,12 @@ def _detect_separator(csv_path: Path) -> str:
 _GENERIC_YEAR_COLUMNS = (
     "data",
     "mes_ano",
+    "data_parada",  # monitriip-servico-regular-paradas
     "data_ocorrencia",
+    "data_do_acidente",
+    "data_acidente",
+    "data_da_ocorrencia",
+    "data_viagem_progamada",  # grafia da fonte
     "data_hora",
     "data_hora_inicio",
     "data_viagem",
@@ -170,6 +164,11 @@ _GENERIC_YEAR_COLUMNS = (
 YEAR_COLUMNS: dict[str, tuple[str, ...]] = {
     "rntrc": (),
 }
+# Ultimo recurso, quando nenhuma coluna da lista acima existe (cada concessionaria
+# publica o seu CSV de acidentes, com cabecalhos ligeiramente diferentes): a
+# primeira coluna cujo nome diga ser uma data. Linha sem ano valido segue para a
+# quarentena; nada e inventado.
+_DATE_LIKE_COLUMN = re.compile(r"^(data|dt)(_|$)|_data$|^mes_ano$")
 _ANO_MIN, _ANO_MAX = 1900, 2100
 _YEAR_TOKEN = re.compile(r"(?<!\d)((?:19|20)\d{2})(?!\d)")
 
@@ -186,7 +185,28 @@ def _declared_year(*names: str) -> int | None:
     return None
 
 
+def _slug_of(filename: str) -> str:
+    """Slug do catalogo no nome local ``<slug>@AAAAMMDD.<ext>`` ('' se nao seguir)."""
+    base = Path(filename.replace("\\", "/")).name
+    if "@" not in base:
+        return ""
+    return base.split("@", 1)[0].lower()
+
+
 def _detect_dataset_id(filename: str) -> str | None:
+    """Conjunto do lake para um arquivo/membro.
+
+    O slug do nome local (``<slug>@AAAAMMDD``) manda: slug de um conjunto do lake
+    vale por igualdade; slug catalogado sem conversor (``vale-pedagio-obrigatorio``,
+    ``praca-de-pedagio``, ``volume-radar``...) devolve ``None`` em vez de cair na
+    heuristica por substring. So nomes sem slug conhecido (membros de ZIP, nomes
+    originais da fonte) usam a heuristica.
+    """
+    slug = _slug_of(filename)
+    if slug in DATASETS:
+        return slug
+    if slug in CATALOG:
+        return None
     s = filename.lower()
     if "praca" in s or "pedagio" in s or "volume" in s:
         return "volume-trafego-praca-pedagio"
@@ -199,6 +219,18 @@ def _detect_dataset_id(filename: str) -> str | None:
     if "monitriip" in s or "parada" in s:
         return "monitriip-servico-regular-paradas"
     return None
+
+
+def _source_url_name(raw_file: Path) -> str:
+    """Nome do arquivo na URL de origem, lido do manifesto vizinho (``''`` se nao
+    houver). O nome local ``<slug>@AAAAMMDD`` perde o periodo que a fonte poe no
+    nome (``transportadores_rntrc_10_2020.csv``)."""
+    manifest = raw_file.with_name(raw_file.name + ".manifest.json")
+    try:
+        url = json.loads(manifest.read_text(encoding="utf-8")).get("url") or ""
+    except (OSError, ValueError, AttributeError):
+        return ""
+    return str(url).split("?", 1)[0].rsplit("/", 1)[-1]
 
 
 class AnttLakeConverter:
@@ -261,7 +293,11 @@ class AnttLakeConverter:
 
             for name in members:
                 label = name or raw_file.name
-                ds_id = _detect_dataset_id(label) or _detect_dataset_id(raw_file.name)
+                ds_id = (
+                    _detect_dataset_id(raw_file.name)
+                    if _slug_of(raw_file.name) in CATALOG
+                    else _detect_dataset_id(label) or _detect_dataset_id(raw_file.name)
+                )
                 if not ds_id or ds_id not in writers:
                     continue
                 # Cada membro e uma origem propria no lake (chave composta
@@ -312,6 +348,8 @@ class AnttLakeConverter:
 
         wanted = YEAR_COLUMNS.get(ds_id, _GENERIC_YEAR_COLUMNS)
         source = next((c for c in wanted if c in names), None)
+        if source is None and ds_id not in YEAR_COLUMNS:
+            source = next((c for c in names if _DATE_LIKE_COLUMN.search(c)), None)
         if source is not None:
             # Ano do registro, por linha. Linha sem ano valido NAO ganha ano
             # inventado: vai para a particao de quarentena (ano nulo).
@@ -322,7 +360,9 @@ class AnttLakeConverter:
             )
             ano = pl.when(ano.is_between(_ANO_MIN, _ANO_MAX)).then(ano)
         else:
-            declared = _declared_year(label, raw_file.name.split("@", 1)[0])
+            declared = _declared_year(
+                label, raw_file.name.split("@", 1)[0], _source_url_name(raw_file)
+            )
             if declared is None:
                 raise ValueError(
                     f"sem coluna de ano ({'/'.join(wanted) or 'nenhuma'}) e sem "

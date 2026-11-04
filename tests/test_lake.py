@@ -193,3 +193,88 @@ def test_latin1_decodes_and_reconversion_is_idempotent(tmp_path: Path) -> None:
     res = converter.convert(raw_dir.parent, tmp_path / "lake")
     assert res.converted == 0
     assert res.skipped == 2
+
+
+# --- Falhas reais do build do lake (nov/2026) -------------------------------
+def _write_manifest(raw: Path, url: str) -> None:
+    import json
+
+    Path(str(raw) + ".manifest.json").write_text(
+        json.dumps({"url": url}), encoding="utf-8"
+    )
+
+
+def test_monitriip_particiona_por_data_parada(tmp_path: Path) -> None:
+    raw_dir = tmp_path / "raw" / "passageiros"
+    raw_dir.mkdir(parents=True)
+    (raw_dir / "monitriip-servico-regular-paradas@20210105.csv").write_text(
+        "codigo_viagem;data_parada;data_viagem_progamada\n"
+        "1;01-12-2019 07:20:53;2019-12-01\n"
+        "2;02-01-2020 08:00:00;2019-12-31\n",
+        encoding="utf-8",
+    )
+    res = converter.convert(raw_dir.parent, tmp_path / "lake")
+    assert not res.errors, res.errors
+    ds = tmp_path / "lake" / "antt" / "monitriip-servico-regular-paradas"
+    assert _partitions(ds) == {"ano=2019": 1, "ano=2020": 1}
+
+
+def test_rntrc_snapshot_usa_periodo_do_nome_original_no_manifest(
+    tmp_path: Path,
+) -> None:
+    raw_dir = tmp_path / "raw" / "cargas"
+    raw_dir.mkdir(parents=True)
+    raw = raw_dir / "rntrc@20201101.csv"
+    raw.write_text("rntrc;cadastro\n1;01/01/1999\n2;05/05/2010\n", encoding="utf-8")
+    _write_manifest(raw, "https://x/download/transportadores_rntrc_10_2020.csv")
+    res = converter.convert(raw_dir.parent, tmp_path / "lake")
+    assert not res.errors, res.errors
+    assert _partitions(tmp_path / "lake" / "antt" / "rntrc") == {"ano=2020": 2}
+
+
+def test_rntrc_sem_periodo_conhecido_nao_inventa_ano(tmp_path: Path) -> None:
+    raw_dir = tmp_path / "raw" / "cargas"
+    raw_dir.mkdir(parents=True)
+    (raw_dir / "rntrc@20201101.csv").write_text("rntrc\n1\n", encoding="utf-8")
+    res = converter.convert(raw_dir.parent, tmp_path / "lake")
+    assert len(res.errors) == 1
+    assert "particao por ano indeterminada" in res.errors[0]
+    assert not (tmp_path / "lake" / "antt" / "rntrc").exists() or not list(
+        (tmp_path / "lake" / "antt" / "rntrc").rglob("*.parquet")
+    )
+
+
+def test_conjuntos_sem_conversor_nao_caem_em_volume_pedagio(tmp_path: Path) -> None:
+    """Slugs catalogados fora do lake (vale-pedagio, praca-de-pedagio, radar...)
+    são ignorados, não classificados por substring como volume de praça."""
+    raw_dir = tmp_path / "raw" / "x"
+    raw_dir.mkdir(parents=True)
+    for slug in (
+        "vale-pedagio-obrigatorio",
+        "praca-de-pedagio",
+        "volume-radar",
+        "volume-sat",
+        "volume-trafego-equivalente-praca-pedagio",
+        "receita-por-praca",
+        "acidentes-quilometro-rodovias",
+        "rntrc-veiculos",
+    ):
+        (raw_dir / f"{slug}@20261101.csv").write_text("a;b\n1;2\n", encoding="utf-8")
+    res = converter.convert(raw_dir.parent, tmp_path / "lake")
+    assert not res.errors, res.errors
+    assert res.converted == 0
+    assert not list((tmp_path / "lake").rglob("*.parquet"))
+
+
+def test_acidentes_concessionaria_com_coluna_de_data_diferente(
+    tmp_path: Path,
+) -> None:
+    raw_dir = tmp_path / "raw" / "rodovias"
+    raw_dir.mkdir(parents=True)
+    (raw_dir / "acidentes-rodovias@20261028.csv").write_text(
+        "data_do_acidente;km\n11/11/2013;1\n02/03/2014;2\n", encoding="utf-8"
+    )
+    res = converter.convert(raw_dir.parent, tmp_path / "lake")
+    assert not res.errors, res.errors
+    ds = tmp_path / "lake" / "antt" / "acidentes-rodovias"
+    assert _partitions(ds) == {"ano=2013": 1, "ano=2014": 1}
