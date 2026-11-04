@@ -278,3 +278,16 @@ def test_acidentes_concessionaria_com_coluna_de_data_diferente(
     assert not res.errors, res.errors
     ds = tmp_path / "lake" / "antt" / "acidentes-rodovias"
     assert _partitions(ds) == {"ano=2013": 1, "ano=2014": 1}
+
+
+def test_cp1252_com_bytes_indefinidos_nao_quebra(tmp_path: Path) -> None:
+    """Bytes 0x8d/0x90 (indefinidos no cp1252) não derrubam a conversão."""
+    raw_dir = tmp_path / "raw" / "rodovias"
+    raw_dir.mkdir(parents=True)
+    (raw_dir / "acidentes-rodovias@20261028.csv").write_bytes(
+        b"data;local\n01/01/2020;S\xc3O \x8d\n01/01/2020;A\x90\n"
+    )
+    res = converter.convert(raw_dir.parent, tmp_path / "lake")
+    assert not res.errors, res.errors
+    ds = tmp_path / "lake" / "antt" / "acidentes-rodovias"
+    assert _partitions(ds) == {"ano=2020": 2}

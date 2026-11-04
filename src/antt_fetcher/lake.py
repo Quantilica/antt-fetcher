@@ -61,7 +61,11 @@ _LEGACY = "cp1252"
 def _c1_passthrough(exc: UnicodeDecodeError) -> tuple[str, int]:
     """Bytes indefinidos no cp1252 viram o controle C1 de mesmo codigo (sem perda
     e sem U+FFFD). Outros erros continuam erros."""
-    if exc.encoding.lower().replace("-", "").replace("_", "") != "cp1252":
+    # O decodificador cp1252 do Python reporta o erro com encoding "charmap".
+    if exc.encoding.lower().replace("-", "").replace("_", "") not in (
+        "cp1252",
+        "charmap",
+    ):
         raise exc
     return "".join(chr(b) for b in exc.object[exc.start : exc.end]), exc.end
 

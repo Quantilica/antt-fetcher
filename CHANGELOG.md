@@ -8,6 +8,7 @@ e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR
 ## [Não lançado]
 
 ### Corrigido
+- `lake`: CSV em cp1252 com bytes indefinidos (0x8d, 0x90...) converte em vez de falhar com `'charmap' codec can't decode`; o tratador de erros não reconhecia o encoding que o Python reporta (`charmap`).
 - `lake`: o conjunto vem do slug do nome local (`<slug>@AAAAMMDD`); conjuntos catalogados sem conversor (`vale-pedagio-obrigatorio`, `praca-de-pedagio`, `volume-radar`, `volume-sat`, `receita-por-praca`, `rntrc-veiculos`...) deixam de ser tomados por volume de praça ou acidentes por substring do nome e são ignorados sem erro.
 - `lake`: `monitriip-servico-regular-paradas` particiona por `data_parada`; acidentes por concessionária aceita cabeçalhos de data diferentes (`data_do_acidente` etc.); o `rntrc` (fotografia) lê o período do nome original da URL no manifesto vizinho. Sem coluna nem período conhecido, segue o erro explícito, sem ano inventado.
 - Sem o extra `analysis`, o comando `convert` termina com código 1 e a instrução de instalação (`quantilica install antt --extra analysis`), sem traceback.
