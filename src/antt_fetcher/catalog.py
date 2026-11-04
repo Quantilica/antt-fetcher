@@ -3,36 +3,75 @@
 Os pacotes do CKAN da ANTT agrupam vários recursos (CSV/JSON/ZIP) e o `sync`
 genérico do SDK baixaria apenas o JSON do pacote. O catálogo expande cada
 pacote em uma entrada por recurso real, com a URL de download.
+
+O catálogo é em duas camadas, com um módulo ``catalog_<dominio>.py`` por grupo
+(``CATALOG`` traz os 106 pacotes do CKAN mais o conjunto do gov.br):
+
+- ``tier="r1"``: baixa hoje; é o que :func:`list_datasets` expande;
+- ``tier="listed"``: catalogado, com download em release futura; visível em
+  :func:`catalog_rows` e no comando ``catalogo``.
 """
 
 from __future__ import annotations
 
+import logging
 import re
 import unicodedata
 from typing import Any
 
-from ._catalog_base import DatasetEntry, GroupInfo
+from . import (
+    catalog_cargas,
+    catalog_ferrovias,
+    catalog_fiscalizacao,
+    catalog_govbr,
+    catalog_ouvidoria,
+    catalog_passageiros,
+    catalog_rodovias,
+    catalog_tecnologia,
+    catalog_visualizacoes,
+)
+from ._catalog_base import AnttDataset, DatasetEntry, GroupInfo
 from .client import AnttClient
 from .constants import DATASETS_BY_GROUP
 
 __all__ = [
     "DatasetEntry",
     "GroupInfo",
+    "AnttDataset",
     "GROUPS",
     "GROUP_ALIASES",
+    "MACRO_ALIASES",
+    "CATALOG",
+    "catalog_rows",
+    "expand_group",
     "list_datasets",
+    "resolve_govbr_url",
 ]
 
-GROUP_NAMES: dict[str, str] = {
-    "rodovias": "Rodovias Federais Concedidas",
-    "cargas": "Transporte Rodoviário de Cargas",
-    "passageiros": "Transporte de Passageiros",
-    "ferrovias": "Transporte Ferroviário",
-    "fiscalizacao": "Fiscalização e Autos de Infração",
+logger = logging.getLogger(__name__)
+
+_MODULES = [
+    catalog_rodovias,
+    catalog_cargas,
+    catalog_passageiros,
+    catalog_ferrovias,
+    catalog_fiscalizacao,
+    catalog_ouvidoria,
+    catalog_tecnologia,
+    catalog_visualizacoes,
+    catalog_govbr,
+]
+
+GROUP_NAMES: dict[str, str] = {mod.GROUP: mod.NAME for mod in _MODULES}
+
+# slug -> descritor, de todos os conjuntos catalogados (R1 e listados).
+CATALOG: dict[str, AnttDataset] = {
+    ds.slug: ds for mod in _MODULES for ds in mod.DATASETS
 }
 
 _FORMATOS = {"CSV", "JSON", "ZIP", "PARQUET"}
 _CACHE: dict[str, list[dict[str, Any]]] = {}
+_GOVBR_XLSX_RE = re.compile(r'href="([^"]+origem-destino[^"]*\.xlsx)"', re.IGNORECASE)
 
 
 def _slugify(value: str) -> str:
@@ -49,16 +88,56 @@ def _ext(url: str, fmt: str) -> str:
     return fmt.lower()
 
 
+def resolve_govbr_url(html: str) -> str | None:
+    """Extrai a URL do XLSX origem-destino da página do gov.br (ou ``None``)."""
+    match = _GOVBR_XLSX_RE.search(html)
+    return match.group(1) if match else None
+
+
+def _govbr_entries() -> list[dict[str, Any]]:
+    """Entrada do XLSX do gov.br, com a URL resolvida pela página."""
+    client = AnttClient()
+    entries: list[dict[str, Any]] = []
+    for slug, page in catalog_govbr.PAGES.items():
+        try:
+            url = resolve_govbr_url(client.client.get(page).text)
+        except Exception as exc:  # noqa: BLE001 - gov.br fora do ar não derruba o grupo
+            logger.warning("gov.br indisponível (%s): %s", page, exc)
+            continue
+        if not url:
+            logger.warning("XLSX origem-destino não encontrado em %s", page)
+            continue
+        entries.append(
+            DatasetEntry(
+                id=slug,
+                base_id=slug,
+                name=CATALOG[slug].title,
+                url=url,
+                ext="xlsx",
+                group="govbr",
+                slug=slug,
+            ).to_dict()
+        )
+    return entries
+
+
 def _entries_for_group(group: str) -> list[dict[str, Any]]:
-    """Expande os pacotes do grupo em uma entrada por recurso."""
+    """Expande os pacotes R1 do grupo em uma entrada por recurso."""
     if group in _CACHE:
+        return _CACHE[group]
+    if group == "govbr":
+        _CACHE[group] = _govbr_entries()
         return _CACHE[group]
 
     client = AnttClient()
     entries: list[dict[str, Any]] = []
     seen: set[str] = set()
     for package_slug in DATASETS_BY_GROUP.get(group, []):
-        package = client.package_show(package_slug)
+        try:
+            package = client.package_show(package_slug)
+        except Exception as exc:  # noqa: BLE001 - pacote removido não derruba o grupo
+            logger.warning("Pacote %s indisponível no CKAN: %s", package_slug, exc)
+            continue
         for resource in client.pick_package_resources(package):
             fmt = str(resource.get("format") or "").strip().upper()
             if fmt not in _FORMATOS:
@@ -69,7 +148,10 @@ def _entries_for_group(group: str) -> list[dict[str, Any]]:
             name = str(resource.get("name") or resource.get("id") or package_slug)
             ident = _slugify(f"{package_slug}-{name}")[:80]
             if ident in seen:
-                ident = _slugify(f"{ident}-{resource.get('id')}")[:80]
+                # sufixo depois do corte: o truncamento em 80 caracteres comia o
+                # ano e o id do recurso, e as entradas colidiam.
+                rid = _slugify(str(resource.get("id") or len(seen)))[:8]
+                ident = f"{ident[:70].rstrip('-')}-{rid}"
             seen.add(ident)
             entries.append(
                 DatasetEntry(
@@ -90,21 +172,61 @@ GROUPS: dict[str, dict[str, Any]] = {
     grp: {"name": name, "entries": []} for grp, name in GROUP_NAMES.items()
 }
 
-GROUP_ALIASES: dict[str, str] = {
-    "padrao": "rodovias",
-    "principal": "rodovias",
+# Macro-aliases: um apelido que engloba vários grupos canônicos.
+MACRO_ALIASES: dict[str, list[str]] = {
+    "infraestrutura": ["rodovias", "ferrovias"],
+    "transporte-rodoviario": ["rodovias", "cargas", "passageiros"],
+    "gestao": ["ouvidoria", "tecnologia", "visualizacoes"],
+}
+
+GROUP_ALIASES: dict[str, list[str]] = {
+    **MACRO_ALIASES,
+    "padrao": ["rodovias"],
+    "principal": ["rodovias"],
+    "ferroviario": ["ferrovias"],
+    "multas": ["fiscalizacao"],
+    "autos": ["fiscalizacao"],
 }
 
 
-def list_datasets(group: str | None = None) -> list[dict[str, Any]]:
-    """Lista recursos reais dos pacotes CKAN, por grupo."""
-    if group is None:
-        entries: list[dict[str, Any]] = []
-        for group_id in GROUPS:
-            entries.extend(_entries_for_group(group_id))
-        return entries
+def expand_group(key: str) -> list[str]:
+    """Expande um grupo, alias ou macro-alias em ids canônicos de grupo.
 
-    canon = GROUP_ALIASES.get(group, group)
-    if canon not in GROUPS:
-        raise ValueError(f"Grupo desconhecido: {group!r}")
-    return list(_entries_for_group(canon))
+    Raises:
+        ValueError: Se ``key`` não for grupo nem alias.
+    """
+    if key in GROUPS:
+        return [key]
+    targets = GROUP_ALIASES.get(key)
+    if targets is None:
+        raise ValueError(f"Grupo desconhecido: {key!r}")
+    return [t for t in targets if t in GROUPS]
+
+
+def list_datasets(group: str | None = None) -> list[dict[str, Any]]:
+    """Lista recursos reais dos pacotes CKAN R1, por grupo.
+
+    Só o tier ``r1`` baixa hoje; os demais pacotes aparecem em
+    :func:`catalog_rows`.
+    """
+    groups = list(GROUPS) if group is None else expand_group(group)
+    entries: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for group_id in groups:
+        for entry in _entries_for_group(group_id):
+            if entry["id"] not in seen:
+                seen.add(entry["id"])
+                entries.append(entry)
+    return entries
+
+
+def catalog_rows(
+    group: str | None = None, tier: str | None = None
+) -> list[dict[str, Any]]:
+    """Linhas do catálogo estático (um pacote por linha), sem rede."""
+    groups = set(GROUPS if group is None else expand_group(group))
+    return [
+        ds.to_dict()
+        for ds in CATALOG.values()
+        if ds.group in groups and (tier is None or ds.tier == tier)
+    ]

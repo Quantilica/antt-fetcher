@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import datetime as dt
 from dataclasses import asdict, dataclass
-from typing import Any
+from typing import Any, Literal
+
+Tier = Literal["r1", "listed"]
 
 
 @dataclass(frozen=True)
@@ -86,3 +88,39 @@ def annual_datasets(
         )
         for y in range(start_year, end + 1)
     ]
+
+
+@dataclass(frozen=True)
+class AnttDataset:
+    """Descritor estático de um pacote do CKAN da ANTT.
+
+    Attributes:
+        slug: Nome do pacote no CKAN (``base_id`` das entradas).
+        group: Grupo (domínio) canônico.
+        title: Título do pacote.
+        tier: ``r1`` (baixa hoje) ou ``listed`` (listado; download em release futura).
+        n_csv: Recursos CSV no snapshot de 2026-11-03.
+        n_json: Recursos JSON no snapshot de 2026-11-03.
+        n_other: Arquivos de dados fora do CKAN (ex.: XLSX do gov.br).
+        note: Observação (volume, ausência de CSV/JSON etc.).
+    """
+
+    slug: str
+    group: str
+    title: str
+    tier: Tier
+    n_csv: int = 0
+    n_json: int = 0
+    n_other: int = 0
+    note: str = ""
+
+    @property
+    def downloadable(self) -> bool:
+        """Indica se há CSV, JSON ou outro arquivo de dados para baixar."""
+        return bool(self.n_csv or self.n_json or self.n_other)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Converte o descritor em dict."""
+        data = asdict(self)
+        data["downloadable"] = self.downloadable
+        return data

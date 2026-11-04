@@ -73,3 +73,22 @@ def test_download_resource_waf_rejection(tmp_path) -> None:
             )
     assert not target.exists()
     assert not manifest_path.exists()
+
+
+def test_pick_package_resources_nao_funde_arquivos_de_mesmo_name() -> None:
+    """Mesmo ``name`` do CKAN em arquivos distintos não pode colapsar numa entrada."""
+    client = AnttClient()
+    pkg = {
+        "resources": [
+            {"name": "radar", "format": "CSV", "url": "https://x/a/radar_a.csv"},
+            {"name": "radar", "format": "CSV", "url": "https://x/b/radar_b.csv"},
+            {"name": "radar", "format": "JSON", "url": "https://x/b/radar_b.json"},
+            {"name": "so-json", "format": "JSON", "url": "https://x/c/so_json.json"},
+        ]
+    }
+    picked = client.pick_package_resources(pkg)
+    assert sorted(r["url"].rsplit("/", 1)[-1] for r in picked) == [
+        "radar_a.csv",
+        "radar_b.csv",
+        "so_json.json",
+    ]

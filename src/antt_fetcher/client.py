@@ -7,7 +7,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from quantilica.core.ckan import CkanClient, pick_resources
+from quantilica.core.ckan import CkanClient
 from quantilica.core.http import HttpClient
 from quantilica.core.logging import get_logger
 from quantilica.core.manifests import DownloadManifest
@@ -48,8 +48,32 @@ class AnttClient:
         *,
         prefer: Sequence[str] = ("CSV", "JSON", "ZIP"),
     ) -> list[dict[str, Any]]:
-        """Pick best resources from package, prioritizing CSV over JSON."""
-        return pick_resources(package, prefer=prefer, dedupe_by_name=True)
+        """Escolhe um recurso por arquivo, preferindo CSV a JSON.
+
+        Agrupa pelo nome do arquivo da URL (sem extensão), e não pelo ``name``
+        do CKAN: o portal reaproveita o mesmo ``name`` em arquivos distintos
+        (ex.: vários ``radar`` de concessionárias), o que fundia arquivos
+        diferentes. Em duplicatas do mesmo arquivo, vence o formato preferido e
+        depois o maior ``size`` (cópias vazias, só com cabeçalho, perdem).
+        """
+        ranks = {fmt.upper(): rank for rank, fmt in enumerate(prefer)}
+        groups: dict[str, list[dict[str, Any]]] = {}
+        for resource in package.get("resources") or []:
+            url = str(resource.get("url") or "")
+            filename = url.rsplit("/", 1)[-1].split("?", 1)[0]
+            stem = filename.rsplit(".", 1)[0].strip().lower()
+            key = stem or str(resource.get("name") or resource.get("id") or "").strip()
+            groups.setdefault(key, []).append(resource)
+
+        def order(resource: dict[str, Any]) -> tuple[int, int]:
+            fmt = str(resource.get("format") or "").strip().upper()
+            try:
+                size = int(resource.get("size") or 0)
+            except (TypeError, ValueError):
+                size = 0
+            return ranks.get(fmt, 999), -size
+
+        return [min(candidates, key=order) for candidates in groups.values()]
 
     def download_resource(
         self,
