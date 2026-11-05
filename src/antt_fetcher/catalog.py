@@ -14,6 +14,7 @@ O catálogo é em duas camadas, com um módulo ``catalog_<dominio>.py`` por grup
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
 import unicodedata
@@ -81,6 +82,30 @@ def _slugify(value: str) -> str:
     return re.sub(r"[^\w-]+", "-", normalized).strip("-").lower()
 
 
+def _resource_keys(
+    usable: list[tuple[dict[str, Any], str, str]],
+) -> dict[int, str]:
+    """Identificador estavel e unico por recurso de um pacote com varios recursos.
+
+    ``<slug do nome, ate 40 caracteres>-<8 primeiros caracteres do id do CKAN>``;
+    sem id, usa um hash da URL. Deterministico, ASCII e sem data. Se duas chaves
+    ainda coincidirem, o hash da URL desempata.
+    """
+    keys: dict[int, str] = {}
+    used: set[str] = set()
+    for index, (resource, _fmt, url) in enumerate(usable):
+        name = str(resource.get("name") or "")
+        rid = _slugify(str(resource.get("id") or ""))[:8]
+        digest = hashlib.sha1(url.encode("utf-8")).hexdigest()  # noqa: S324
+        tail = rid or digest[:8]
+        key = "-".join(p for p in (_slugify(name)[:40].strip("-"), tail) if p)
+        if key in used:
+            key = f"{key}-{digest[:6]}"
+        used.add(key)
+        keys[index] = key
+    return keys
+
+
 def _ext(url: str, fmt: str) -> str:
     filename = url.rsplit("/", 1)[-1].split("?", 1)[0]
     if "." in filename:
@@ -138,6 +163,7 @@ def _entries_for_group(group: str) -> list[dict[str, Any]]:
         except Exception as exc:  # noqa: BLE001 - pacote removido não derruba o grupo
             logger.warning("Pacote %s indisponível no CKAN: %s", package_slug, exc)
             continue
+        usable: list[tuple[dict[str, Any], str, str]] = []
         for resource in client.pick_package_resources(package):
             fmt = str(resource.get("format") or "").strip().upper()
             if fmt not in _FORMATOS:
@@ -145,6 +171,11 @@ def _entries_for_group(group: str) -> list[dict[str, Any]]:
             url = str(resource.get("url") or "")
             if not url:
                 continue
+            usable.append((resource, fmt, url))
+        # Pacote com varios recursos (um por concessionaria, por exemplo): o nome
+        # local precisa distinguir os recursos, senao todos viram ``<pacote>@data``.
+        keys = _resource_keys(usable) if len(usable) > 1 else {}
+        for index, (resource, fmt, url) in enumerate(usable):
             name = str(resource.get("name") or resource.get("id") or package_slug)
             ident = _slugify(f"{package_slug}-{name}")[:80]
             if ident in seen:
@@ -162,6 +193,7 @@ def _entries_for_group(group: str) -> list[dict[str, Any]]:
                     ext=_ext(url, fmt),
                     group=group,
                     slug=package_slug,
+                    resource_key=keys.get(index),
                 ).to_dict()
             )
     _CACHE[group] = entries

@@ -24,6 +24,9 @@ class DatasetEntry:
     quarter: int | None = None
     month: int | None = None
     slug: str | None = None
+    # Identificador estavel do recurso, so em pacotes com varios recursos: entra
+    # no nome do arquivo para recursos distintos nao compartilharem o mesmo nome.
+    resource_key: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Convert entry to dict."""

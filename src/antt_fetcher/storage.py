@@ -33,31 +33,34 @@ class DataRepository(BaseDataRepository):
         month = entry.get("month")
         quarter = entry.get("quarter")
         slug = entry.get("slug")
+        resource_key = entry.get("resource_key")
 
         timestamp = last_modified or dt.date.today()
 
         if year is None:
-            filename = stamp_filename(base_id, ext, timestamp)
+            # recurso unico: ``resource_key`` vazio e o nome segue como sempre foi.
+            stem = f"{base_id}_{resource_key}" if resource_key else base_id
+            filename = stamp_filename(stem, ext, timestamp)
         elif month is not None:
             partition = f"{year}-{month:02d}"
             if slug:
                 partition = f"{partition}_{slug}"
             filename = build_stamped_filename(
-                base_id, partition, ext=ext, timestamp=timestamp
+                base_id, resource_key, partition, ext=ext, timestamp=timestamp
             )
         elif quarter is not None:
             partition = f"{year}-T{quarter:02d}"
             if slug:
                 partition = f"{partition}_{slug}"
             filename = build_stamped_filename(
-                base_id, partition, ext=ext, timestamp=timestamp
+                base_id, resource_key, partition, ext=ext, timestamp=timestamp
             )
         else:
             partition = str(year)
             if slug:
                 partition = f"{partition}_{slug}"
             filename = build_stamped_filename(
-                base_id, partition, ext=ext, timestamp=timestamp
+                base_id, resource_key, partition, ext=ext, timestamp=timestamp
             )
 
         return self.storage.path_for(f"{group}/{filename}")
