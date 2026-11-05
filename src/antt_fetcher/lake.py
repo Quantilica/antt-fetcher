@@ -45,6 +45,7 @@ DATASETS = [
     "relatorio-acompanhamento-acidentes-ferroviarios-raaf",
     "ciot",
     "vale-pedagio-obrigatorio",
+    "investimentos",
 ]
 
 

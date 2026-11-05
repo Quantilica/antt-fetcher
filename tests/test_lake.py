@@ -395,3 +395,19 @@ def test_vale_pedagio_particiona_por_ano_de_emissao(tmp_path: Path) -> None:
     assert df["valor_dos_vpos"].to_list()[0] == "2083658.08"
     (plan,) = converter.inventory(raw_dir.parent)
     assert plan.dataset == "vale-pedagio-obrigatorio"
+
+
+# --- investimentos ----------------------------------------------------------
+def test_investimentos_particiona_pela_coluna_ano(tmp_path: Path) -> None:
+    raw_dir = _raw(tmp_path, "rodovias")
+    shutil.copy(_FIXTURES / "investimentos.csv", raw_dir / "investimentos@20260522.csv")
+    res = converter.convert(raw_dir.parent, tmp_path / "lake")
+    assert not res.errors, res.errors
+    ds = tmp_path / "lake" / "antt" / "investimentos"
+    assert _partitions(ds) == {"ano=2010": 3, "ano=2025": 1}
+    assert not check_dataset(ds)
+    df = pl.read_parquet(next((ds / "ano=2010").glob("*.parquet")))
+    assert {"concessionaria", "valor"} <= set(df.columns)
+    assert "AUTOPISTA FERNÃO DIAS" in df["concessionaria"].to_list()
+    (plan,) = converter.inventory(raw_dir.parent)
+    assert plan.dataset == "investimentos"
