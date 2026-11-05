@@ -562,3 +562,62 @@ def test_volume_sat_json_fora_do_formato_da_erro(tmp_path: Path) -> None:
     assert len(res.errors) == 1
     assert "um registro por linha" in res.errors[0]
     assert not list((tmp_path / "lake").rglob("*.parquet"))
+
+
+# --- conjunto pelo prefixo do slug -----------------------------------------
+def test_conjunto_reconhecido_com_e_sem_identificador_de_recurso() -> None:
+    from antt_fetcher.lake import _detect_dataset_id, _slug_of
+
+    assert _detect_dataset_id("ciot@20261010.csv") == "ciot"
+    assert _detect_dataset_id("ciot_09-2026-ciots-1a2b3c4d@20261010.csv") == "ciot"
+    assert (
+        _detect_dataset_id("volume-radar_radar-x-1a2b3c4d@20260928.csv")
+        == "volume-radar"
+    )
+    assert _detect_dataset_id("receita-por-praca_x-1a2b3c4d@20260928.csv") is None
+    assert _slug_of("volume-radar_radar-x-1a2b3c4d@20260928.csv") == "volume-radar"
+    assert _slug_of("rntrc_2024@20261010.csv") == "rntrc"
+    assert _slug_of("volume-radar@20260928.csv") == "volume-radar"
+    # maior prefixo: nao confunde com outro conjunto de prefixo comum
+    assert (
+        _slug_of("volume-trafego-equivalente-praca-pedagio_a-12345678@20260928.csv")
+        == "volume-trafego-equivalente-praca-pedagio"
+    )
+    # sem slug conhecido, segue o comportamento antigo
+    assert _slug_of("qualquer@20260101.csv") == "qualquer"
+    assert _slug_of("sem-carimbo.csv") == ""
+    # equivalente-praca-pedagio nao cai na heuristica de "volume"/"pedagio"
+    assert (
+        _detect_dataset_id(
+            "volume-trafego-equivalente-praca-pedagio_a-12345678@20260928.csv"
+        )
+        is None
+    )
+
+
+def test_ciot_com_identificador_converte_e_recursos_nao_colidem(
+    tmp_path: Path,
+) -> None:
+    raw_dir = _raw(tmp_path, "cargas")
+    a = raw_dir / "ciot_09-2026-ciots-aaaa1111@20261010.csv"
+    b = raw_dir / "ciot_08-2026-ciots-bbbb2222@20261010.csv"
+    shutil.copy(_FIXTURES / "ciot.csv", a)
+    shutil.copy(_FIXTURES / "ciot.csv", b)
+    plans = converter.inventory(raw_dir.parent)
+    assert {p.dataset for p in plans} == {"ciot"}
+    res = converter.convert(raw_dir.parent, tmp_path / "lake")
+    assert not res.errors, res.errors
+    assert _partitions(tmp_path / "lake" / "antt" / "ciot") == {"ano=2026": 8}
+
+
+def test_equivalente_praca_pedagio_com_identificador_e_ignorado(
+    tmp_path: Path,
+) -> None:
+    raw_dir = _raw(tmp_path, "rodovias")
+    shutil.copy(
+        _FIXTURES / "ciot.csv",
+        raw_dir / "volume-trafego-equivalente-praca-pedagio_a-12345678@20260928.csv",
+    )
+    res = converter.convert(raw_dir.parent, tmp_path / "lake")
+    assert not res.errors, res.errors
+    assert not (tmp_path / "lake" / "antt" / "volume-trafego-praca-pedagio").exists()

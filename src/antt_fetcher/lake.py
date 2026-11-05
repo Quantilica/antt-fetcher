@@ -267,12 +267,28 @@ def _declared_year(*names: str) -> int | None:
     return None
 
 
+_KNOWN_SLUGS = frozenset(DATASETS) | frozenset(CATALOG)
+_KNOWN_SLUGS_BY_LENGTH = sorted(_KNOWN_SLUGS, key=len, reverse=True)
+
+
 def _slug_of(filename: str) -> str:
-    """Slug do catalogo no nome local ``<slug>@AAAAMMDD.<ext>`` ('' se nao seguir)."""
+    """Slug do catalogo no nome local ``<slug>@AAAAMMDD.<ext>`` ('' se nao seguir).
+
+    O nome pode trazer, depois do slug, um identificador (``_``/``-``) do recurso
+    ou da particao (``<slug>_<recurso>-<id8>@AAAAMMDD``); vale o maior slug
+    conhecido (conjunto do lake ou do catalogo) que seja prefixo seguido de ``_``
+    ou ``-``. Sem slug conhecido, devolve o texto antes do ``@``.
+    """
     base = Path(filename.replace("\\", "/")).name
     if "@" not in base:
         return ""
-    return base.split("@", 1)[0].lower()
+    head = base.split("@", 1)[0].lower()
+    if head in _KNOWN_SLUGS:
+        return head
+    for known in _KNOWN_SLUGS_BY_LENGTH:
+        if head.startswith(known) and head[len(known)] in "_-":
+            return known
+    return head
 
 
 def _detect_dataset_id(filename: str) -> str | None:
