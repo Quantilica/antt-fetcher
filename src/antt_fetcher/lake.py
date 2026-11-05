@@ -448,7 +448,7 @@ class AnttLakeConverter:
             )
 
         all_raw_files = [f for f in input_path.rglob("*") if f.is_file()]
-        active_files = select_current(all_raw_files)
+        active_files = [Path(f) for f in select_current(all_raw_files)]
 
         for raw_file in active_files:
             try:
