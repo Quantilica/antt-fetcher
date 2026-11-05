@@ -43,6 +43,7 @@ DATASETS = [
     "rntrc",
     "monitriip-servico-regular-paradas",
     "relatorio-acompanhamento-acidentes-ferroviarios-raaf",
+    "ciot",
 ]
 
 
@@ -201,7 +202,7 @@ def _detect_separator(csv_path: Path) -> str:
 # passo (2): uma fotografia tirada em janeiro costuma retratar dezembro do ano
 # anterior. Conjuntos de eventos sem coluna de data continuam dando erro: so
 # fotografias caem no carimbo.
-SNAPSHOT_DATASETS = frozenset({"rntrc"})
+SNAPSHOT_DATASETS = frozenset({"rntrc", "ciot"})
 _GENERIC_YEAR_COLUMNS = (
     "data",
     "mes_ano",

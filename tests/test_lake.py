@@ -346,3 +346,34 @@ def test_inventory_zip_e_diretorio_inexistente(tmp_path: Path) -> None:
     plan = {p.path.name: p for p in converter.inventory(raw_dir.parent)}
     assert plan["acidentes_2024@20261101.zip"].dataset == "acidentes-rodovias"
     assert plan["quebrado@20261101.zip"].dataset is None
+
+
+# --- ciot -------------------------------------------------------------------
+def test_ciot_particiona_pelo_periodo_do_nome_original(tmp_path: Path) -> None:
+    """CIOT e agregado mensal por origem/destino, sem data: o ano vem do periodo
+    do nome original (09_2026_ciots.csv) e o texto cp1252 e preservado."""
+    raw_dir = _raw(tmp_path, "cargas")
+    raw = raw_dir / "ciot@20261010.csv"
+    shutil.copy(_FIXTURES / "ciot.csv", raw)
+    _write_manifest(raw, "https://x/download/09_2026_ciots.csv")
+    res = converter.convert(raw_dir.parent, tmp_path / "lake")
+    assert not res.errors, res.errors
+    ds = tmp_path / "lake" / "antt" / "ciot"
+    assert _partitions(ds) == {"ano=2026": 4}
+    assert not check_dataset(ds)
+    df = pl.read_parquet(next(ds.rglob("*.parquet")))
+    assert df.columns[:3] == ["municipio_origem", "uf_origem", "municipio_destino"]
+    assert "Paulínia" in df["municipio_destino"].to_list()
+    assert df.schema["quantidade_ciots"] == pl.String
+
+
+def test_ciot_sem_manifesto_usa_o_carimbo_e_inventory_o_lista(
+    tmp_path: Path,
+) -> None:
+    raw_dir = _raw(tmp_path, "cargas")
+    shutil.copy(_FIXTURES / "ciot.csv", raw_dir / "ciot@20261010.csv")
+    res = converter.convert(raw_dir.parent, tmp_path / "lake")
+    assert not res.errors, res.errors
+    assert _partitions(tmp_path / "lake" / "antt" / "ciot") == {"ano=2026": 4}
+    (plan,) = converter.inventory(raw_dir.parent)
+    assert plan.dataset == "ciot"
