@@ -13,6 +13,8 @@ e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR
 - `lake`: `inventory()` informa, para cada arquivo bruto, o conjunto que ele alimenta ou o motivo de ficar de fora (`superado`, `nao_tabular`, `gemeo`); arquivo de conjunto ainda sem conversor aparece sem conjunto e sem motivo.
 
 ### Corrigido
+- Pacotes com varios recursos (um por concessionaria: `volume-radar`, `volume-sat`, `quantidade-possiveis-infratores`, `ciot`, `volume-trafego-equivalente-praca-pedagio`...) davam o mesmo nome local a recursos diferentes, e cada download sobrescrevia o anterior (so o ultimo sobrevivia). Agora esses arquivos tem nome unico por recurso: `<pacote>_<nome-do-recurso>-<id8>@AAAAMMDD.<ext>`. Pacote com um unico recurso mantem o nome de sempre. Os arquivos antigos de nome coincidente nao sao migrados automaticamente: o conteudo que ja foi sobrescrito precisa ser baixado de novo.
+- `lake`: o conjunto passa a ser reconhecido pelo prefixo do slug no nome local (com ou sem o identificador do recurso).
 - `lake`: `rntrc@AAAAMMDD.csv` falhava com "particao por ano indeterminada" quando o manifesto vizinho nao estava presente (o Drive guarda so o arquivo bruto). Para fotografias/cadastros (`rntrc`, `ciot`, `praca-de-pedagio`), sem periodo no nome original, o ano passa a ser o do carimbo `@AAAAMMDD`, com aviso no log e sem descartar linhas. O periodo do nome original continua tendo preferencia. Limite conhecido: fotografia tirada em janeiro costuma retratar dezembro do ano anterior. Conjunto de eventos sem coluna de data continua dando erro.
 
 ## [0.2.1] - 2026-11-04
