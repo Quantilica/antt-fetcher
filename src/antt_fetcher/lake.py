@@ -46,6 +46,7 @@ DATASETS = [
     "ciot",
     "vale-pedagio-obrigatorio",
     "investimentos",
+    "praca-de-pedagio",
 ]
 
 
@@ -204,7 +205,10 @@ def _detect_separator(csv_path: Path) -> str:
 # passo (2): uma fotografia tirada em janeiro costuma retratar dezembro do ano
 # anterior. Conjuntos de eventos sem coluna de data continuam dando erro: so
 # fotografias caem no carimbo.
-SNAPSHOT_DATASETS = frozenset({"rntrc", "ciot"})
+# ``praca-de-pedagio`` e o cadastro das pracas: ``ano_do_pnv_snv`` e a versao do
+# mapa da malha, nao o ano do registro, e ``data_da_inativacao`` quase sempre vem
+# vazia; por isso o ano e o da fotografia.
+SNAPSHOT_DATASETS = frozenset({"rntrc", "ciot", "praca-de-pedagio"})
 _GENERIC_YEAR_COLUMNS = (
     "data",
     "mes_ano",

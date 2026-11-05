@@ -274,7 +274,6 @@ def test_conjuntos_sem_conversor_nao_caem_em_volume_pedagio(tmp_path: Path) -> N
     raw_dir = tmp_path / "raw" / "x"
     raw_dir.mkdir(parents=True)
     for slug in (
-        "praca-de-pedagio",
         "volume-radar",
         "volume-sat",
         "volume-trafego-equivalente-praca-pedagio",
@@ -411,3 +410,23 @@ def test_investimentos_particiona_pela_coluna_ano(tmp_path: Path) -> None:
     assert "AUTOPISTA FERNÃO DIAS" in df["concessionaria"].to_list()
     (plan,) = converter.inventory(raw_dir.parent)
     assert plan.dataset == "investimentos"
+
+
+# --- praca-de-pedagio -------------------------------------------------------
+def test_praca_de_pedagio_cadastro_particiona_pelo_carimbo(tmp_path: Path) -> None:
+    """Cadastro de pracas: ano_do_pnv_snv (2019) e versao do mapa, nao o ano do
+    registro; o ano e o da fotografia (carimbo), sem descartar linhas."""
+    raw_dir = _raw(tmp_path, "rodovias")
+    shutil.copy(
+        _FIXTURES / "praca-de-pedagio.csv", raw_dir / "praca-de-pedagio@20261103.csv"
+    )
+    res = converter.convert(raw_dir.parent, tmp_path / "lake")
+    assert not res.errors, res.errors
+    ds = tmp_path / "lake" / "antt" / "praca-de-pedagio"
+    assert _partitions(ds) == {"ano=2026": 3}
+    assert not check_dataset(ds)
+    df = pl.read_parquet(next(ds.rglob("*.parquet")))
+    assert df["ano_do_pnv_snv"].to_list() == ["2019"] * 3
+    assert df["latitude"].to_list()[0] == "-21.552594"
+    (plan,) = converter.inventory(raw_dir.parent)
+    assert plan.dataset == "praca-de-pedagio"
