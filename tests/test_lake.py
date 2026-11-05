@@ -274,7 +274,6 @@ def test_conjuntos_sem_conversor_nao_caem_em_volume_pedagio(tmp_path: Path) -> N
     raw_dir = tmp_path / "raw" / "x"
     raw_dir.mkdir(parents=True)
     for slug in (
-        "volume-sat",
         "volume-trafego-equivalente-praca-pedagio",
         "receita-por-praca",
         "acidentes-quilometro-rodovias",
@@ -505,4 +504,61 @@ def test_volume_radar_sem_cabecalho_da_erro_em_vez_de_inventar_ano(
     res = converter.convert(raw_dir.parent, tmp_path / "lake")
     assert len(res.errors) == 1
     assert "particao por ano indeterminada" in res.errors[0]
+    assert not list((tmp_path / "lake").rglob("*.parquet"))
+
+
+# --- volume-sat (JSON e CSV gemeo) -----------------------------------------
+def test_volume_sat_json_multidocumento_particiona_por_ano(tmp_path: Path) -> None:
+    raw_dir = _raw(tmp_path, "rodovias")
+    shutil.copy(_FIXTURES / "volume-sat.json", raw_dir / "volume-sat@20261103.json")
+    res = converter.convert(raw_dir.parent, tmp_path / "lake")
+    assert not res.errors, res.errors
+    ds = tmp_path / "lake" / "antt" / "volume-sat"
+    assert _partitions(ds) == {"ano=2024": 1, "ano=2025": 2, "ano=2026": 2}
+    assert not check_dataset(ds)
+    df = pl.read_parquet(next((ds / "ano=2025").glob("*.parquet")))
+    assert df.schema["volume_total"] == pl.String  # tudo texto, como no CSV
+    assert "ELOVIAS" in df["concessionaria"].to_list()
+    assert "Duque de Caxias" in df["municipio"].to_list()
+    # Reconversao idempotente.
+    again = converter.convert(raw_dir.parent, tmp_path / "lake")
+    assert again.converted == 0 and again.skipped == 3
+
+
+def test_volume_sat_csv_e_gemeo_do_json_de_mesmo_carimbo(tmp_path: Path) -> None:
+    raw_dir = _raw(tmp_path, "rodovias")
+    shutil.copy(_FIXTURES / "volume-sat.json", raw_dir / "volume-sat@20261103.json")
+    shutil.copy(_FIXTURES / "volume-sat.csv", raw_dir / "volume-sat@20261103.csv")
+    res = converter.convert(raw_dir.parent, tmp_path / "lake")
+    assert not res.errors, res.errors
+    ds = tmp_path / "lake" / "antt" / "volume-sat"
+    assert sum(_partitions(ds).values()) == 5  # so o JSON; sem duplicar o CSV
+    plan = {p.path.name: p for p in converter.inventory(raw_dir.parent)}
+    assert plan["volume-sat@20261103.json"].dataset == "volume-sat"
+    assert plan["volume-sat@20261103.json"].skip_reason is None
+    assert plan["volume-sat@20261103.csv"].skip_reason == "gemeo"
+
+
+def test_volume_sat_csv_sozinho_converte_por_data_de_passagem(
+    tmp_path: Path,
+) -> None:
+    raw_dir = _raw(tmp_path, "rodovias")
+    shutil.copy(_FIXTURES / "volume-sat.csv", raw_dir / "volume-sat@20261103.csv")
+    res = converter.convert(raw_dir.parent, tmp_path / "lake")
+    assert not res.errors, res.errors
+    ds = tmp_path / "lake" / "antt" / "volume-sat"
+    assert _partitions(ds) == {"ano=2025": 3}
+    (plan,) = converter.inventory(raw_dir.parent)
+    assert plan.dataset == "volume-sat" and plan.skip_reason is None
+
+
+def test_volume_sat_json_fora_do_formato_da_erro(tmp_path: Path) -> None:
+    raw_dir = _raw(tmp_path, "rodovias")
+    (raw_dir / "volume-sat@20261103.json").write_text(
+        '{"volume_sat":[{"data_de_passagem":"2025-01-01"},\nlixo\n]}\n',
+        encoding="utf-8",
+    )
+    res = converter.convert(raw_dir.parent, tmp_path / "lake")
+    assert len(res.errors) == 1
+    assert "um registro por linha" in res.errors[0]
     assert not list((tmp_path / "lake").rglob("*.parquet"))

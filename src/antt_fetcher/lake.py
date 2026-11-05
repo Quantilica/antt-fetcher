@@ -49,6 +49,7 @@ DATASETS = [
     "praca-de-pedagio",
     "quantidade-possiveis-infratores",
     "volume-radar",
+    "volume-sat",
 ]
 
 
@@ -235,6 +236,8 @@ YEAR_COLUMNS: dict[str, tuple[str, ...]] = {
     # Cada concessionaria publica o seu arquivo; a data pode vir como dd/mm/aaaa
     # ou so mes/ano (02/2025), e o ano sai dos dois.
     "volume-radar": ("data_da_passagem", "mes_ano", "data"),
+    # SAT: o CSV traz data_de_passagem em dd/mm/aaaa e o JSON em aaaa-mm-dd.
+    "volume-sat": ("data_de_passagem", "data_da_passagem"),
 }
 # Ultimo recurso, quando nenhuma coluna da lista acima existe (cada concessionaria
 # publica o seu CSV de acidentes, com cabecalhos ligeiramente diferentes): a
@@ -312,8 +315,12 @@ _NON_TABULAR_SUFFIXES = frozenset(
     {".pdf", ".doc", ".docx", ".odt", ".txt", ".md", ".html", ".htm", ".png",
      ".jpg", ".jpeg", ".gif", ".kml", ".kmz"}
 )  # fmt: skip
-# Conjuntos cujo arquivo e JSON (lista de registros), lido em vez do CSV gemeo.
-JSON_DATASETS: frozenset[str] = frozenset()
+# Conjuntos publicados tambem em JSON (``{"chave":[{...}, ...]}``, um registro por
+# linha, varios documentos por arquivo, um por concessionaria). O JSON junta
+# todas as concessionarias e repete a do CSV (ex.: Nova Rota do Oeste), entao,
+# com os dois no mesmo carimbo, o conversor le o JSON e o CSV e o ``gemeo``:
+# converter os dois duplicaria as passagens.
+JSON_DATASETS: frozenset[str] = frozenset({"volume-sat"})
 
 
 def _is_readable(raw_file: Path) -> bool:
