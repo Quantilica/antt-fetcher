@@ -430,3 +430,29 @@ def test_praca_de_pedagio_cadastro_particiona_pelo_carimbo(tmp_path: Path) -> No
     assert df["latitude"].to_list()[0] == "-21.552594"
     (plan,) = converter.inventory(raw_dir.parent)
     assert plan.dataset == "praca-de-pedagio"
+
+
+# --- quantidade-possiveis-infratores ---------------------------------------
+def test_possiveis_infratores_particiona_por_data_da_passagem(
+    tmp_path: Path,
+) -> None:
+    raw_dir = _raw(tmp_path, "rodovias")
+    raw = raw_dir / "quantidade-possiveis-infratores@20261028.csv"
+    shutil.copy(_FIXTURES / "quantidade-possiveis-infratores.csv", raw)
+    # Uma passagem de dez/2025 junto das de jan/2026: cada linha no seu ano.
+    with open(raw, "ab") as fh:
+        fh.write(
+            b'"VIA CRISTAIS";"D0880";"BR-40";"MG";462.950;"Sete Lagoas";"Principal";'
+            b'-19.420795;-44.339028;"31/12/2025";"Crescente";1;"101 - 120 ";'
+            b'"Comercial";2\r\n'
+        )
+    res = converter.convert(raw_dir.parent, tmp_path / "lake")
+    assert not res.errors, res.errors
+    ds = tmp_path / "lake" / "antt" / "quantidade-possiveis-infratores"
+    assert _partitions(ds) == {"ano=2025": 1, "ano=2026": 3}
+    assert not check_dataset(ds)
+    df = pl.read_parquet(next((ds / "ano=2026").glob("*.parquet")))
+    assert "Veículo Médio" in df["tipo_de_veiculo"].to_list()
+    assert df["velocidade"].to_list()[0] == "101 - 120 "
+    (plan,) = converter.inventory(raw_dir.parent)
+    assert plan.dataset == "quantidade-possiveis-infratores"
