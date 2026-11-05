@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 import zipfile
 from pathlib import Path
 
@@ -9,6 +10,14 @@ import polars as pl
 from quantilica.analytics.lake import check_dataset
 
 from antt_fetcher.lake import converter
+
+_FIXTURES = Path(__file__).parent / "fixtures" / "lake"
+
+
+def _raw(tmp_path: Path, group: str) -> Path:
+    raw_dir = tmp_path / "raw" / group
+    raw_dir.mkdir(parents=True)
+    return raw_dir
 
 
 def test_converter_metadata() -> None:
@@ -232,16 +241,31 @@ def test_rntrc_snapshot_usa_periodo_do_nome_original_no_manifest(
     assert _partitions(tmp_path / "lake" / "antt" / "rntrc") == {"ano=2020": 2}
 
 
-def test_rntrc_sem_periodo_conhecido_nao_inventa_ano(tmp_path: Path) -> None:
-    raw_dir = tmp_path / "raw" / "cargas"
-    raw_dir.mkdir(parents=True)
-    (raw_dir / "rntrc@20201101.csv").write_text("rntrc\n1\n", encoding="utf-8")
+def test_rntrc_sem_manifesto_particiona_pelo_ano_do_carimbo(
+    tmp_path: Path, caplog
+) -> None:
+    """Sem periodo no nome (manifesto ausente, como no Drive), a fotografia
+    cai no ano do carimbo @AAAAMMDD, sem descartar linhas, e avisa no log."""
+    raw_dir = _raw(tmp_path, "cargas")
+    shutil.copy(_FIXTURES / "rntrc.csv", raw_dir / "rntrc@20261010.csv")
+    with caplog.at_level("WARNING"):
+        res = converter.convert(raw_dir.parent, tmp_path / "lake")
+    assert not res.errors, res.errors
+    ds = tmp_path / "lake" / "antt" / "rntrc"
+    assert _partitions(ds) == {"ano=2026": 2}
+    assert "ano do carimbo (2026)" in caplog.text
+    assert not check_dataset(ds)
+
+
+def test_rntrc_manifesto_com_periodo_vence_o_carimbo(tmp_path: Path) -> None:
+    """O periodo do nome original (09_2026) manda; o carimbo e so o ultimo recurso."""
+    raw_dir = _raw(tmp_path, "cargas")
+    raw = raw_dir / "rntrc@20210101.csv"
+    shutil.copy(_FIXTURES / "rntrc.csv", raw)
+    _write_manifest(raw, "https://x/download/transportadores_rntrc_12_2020.csv")
     res = converter.convert(raw_dir.parent, tmp_path / "lake")
-    assert len(res.errors) == 1
-    assert "particao por ano indeterminada" in res.errors[0]
-    assert not (tmp_path / "lake" / "antt" / "rntrc").exists() or not list(
-        (tmp_path / "lake" / "antt" / "rntrc").rglob("*.parquet")
-    )
+    assert not res.errors, res.errors
+    assert _partitions(tmp_path / "lake" / "antt" / "rntrc") == {"ano=2020": 2}
 
 
 def test_conjuntos_sem_conversor_nao_caem_em_volume_pedagio(tmp_path: Path) -> None:
@@ -291,3 +315,34 @@ def test_cp1252_com_bytes_indefinidos_nao_quebra(tmp_path: Path) -> None:
     assert not res.errors, res.errors
     ds = tmp_path / "lake" / "antt" / "acidentes-rodovias"
     assert _partitions(ds) == {"ano=2020": 2}
+
+
+# --- inventory() -------------------------------------------------------------
+def test_inventory_classifica_arquivos(tmp_path: Path) -> None:
+    raw_dir = _raw(tmp_path, "cargas")
+    (raw_dir / "rntrc@20260901.csv").write_text("a\n1\n", encoding="utf-8")
+    (raw_dir / "rntrc@20261001.csv").write_text("a\n1\n", encoding="utf-8")
+    (raw_dir / "rntrc@20261001.csv.manifest.json").write_text("{}", encoding="utf-8")
+    (raw_dir / "dicionario@20261001.pdf").write_bytes(b"%PDF")
+    (raw_dir / "receita-por-praca@20261001.csv").write_text("a\n1\n", "utf-8")
+
+    plan = {p.path.name: p for p in converter.inventory(raw_dir.parent)}
+    assert "rntrc@20261001.csv.manifest.json" not in plan
+    assert plan["rntrc@20260901.csv"].skip_reason == "superado"
+    assert plan["rntrc@20261001.csv"].dataset == "rntrc"
+    assert plan["rntrc@20261001.csv"].skip_reason is None
+    assert plan["dicionario@20261001.pdf"].skip_reason == "nao_tabular"
+    # Sem conversor: lacuna de cobertura, nao exclusao deliberada.
+    assert plan["receita-por-praca@20261001.csv"].dataset is None
+    assert plan["receita-por-praca@20261001.csv"].skip_reason is None
+
+
+def test_inventory_zip_e_diretorio_inexistente(tmp_path: Path) -> None:
+    assert converter.inventory(tmp_path / "nao-existe") == []
+    raw_dir = _raw(tmp_path, "rodovias")
+    with zipfile.ZipFile(raw_dir / "acidentes_2024@20261101.zip", "w") as zf:
+        zf.writestr("acidentes_rodovias_2024.csv", "data\n01/01/2024\n")
+    (raw_dir / "quebrado@20261101.zip").write_bytes(b"PK\x03\x04lixo")
+    plan = {p.path.name: p for p in converter.inventory(raw_dir.parent)}
+    assert plan["acidentes_2024@20261101.zip"].dataset == "acidentes-rodovias"
+    assert plan["quebrado@20261101.zip"].dataset is None

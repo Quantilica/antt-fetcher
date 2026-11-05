@@ -20,6 +20,7 @@ try:
     from quantilica.analytics.lake import ConvertResult, LakeWriter
     from quantilica.core.lake import (
         DatasetDescriptor,
+        Planned,
         composite_file_key,
         partition_types_for,
         select_current,
@@ -137,6 +138,47 @@ def _member_as_utf8(path: Path, name: str | None) -> Iterator[Path]:
         yield dest
 
 
+@contextmanager
+def _member_as_text(path: Path, name: str | None) -> Iterator[Path]:
+    """Texto tabular do membro: CSV em UTF-8 ou, para ``.json``, NDJSON."""
+    if name is None and path.suffix.lower() == ".json":
+        with _json_as_ndjson(path) as ndjson:
+            yield ndjson
+    else:
+        with _member_as_utf8(path, name) as csv_path:
+            yield csv_path
+
+
+@contextmanager
+def _json_as_ndjson(path: Path) -> Iterator[Path]:
+    """Converte ``{"chave":[{...},\\n{...}]}`` (um registro por linha; o arquivo
+    pode juntar varios documentos, um por concessionaria) em NDJSON num
+    temporario. Linha fora desse formato e erro, nunca descartada."""
+    wrapper = re.compile(r'^\{"[^"]+":\[')
+    with tempfile.TemporaryDirectory(
+        dir=os.environ.get("QUANTILICA_LAKE_SCRATCH") or None
+    ) as tmp:
+        dest = Path(tmp) / "membro.ndjson"
+        with (
+            open(path, encoding="utf-8-sig", newline="") as src,
+            open(dest, "w", encoding="utf-8", newline="\n") as out,
+        ):
+            for number, line in enumerate(src, 1):
+                text = wrapper.sub("", line.strip(), count=1)
+                if text.endswith("]}"):
+                    text = text[:-2]
+                text = text.rstrip().rstrip(",")
+                if not text:
+                    continue
+                if not (text.startswith("{") and text.endswith("}")):
+                    raise ValueError(
+                        f"JSON fora do formato 'um registro por linha' na linha "
+                        f"{number}"
+                    )
+                out.write(text + "\n")
+        yield dest
+
+
 def _detect_separator(csv_path: Path) -> str:
     """``;`` se o cabecalho (primeira linha) o contem, senao ``,``."""
     with open(csv_path, encoding="utf-8", newline="") as fh:
@@ -145,10 +187,21 @@ def _detect_separator(csv_path: Path) -> str:
 
 
 # Colunas com data/ano do registro, em ordem de preferencia, por conjunto. A
-# particao ``ano`` vem da linha, nao do arquivo. Conjuntos ausentes daqui (ou com
-# lista vazia) sao fotografias: o ano vem so do periodo declarado no nome do
-# arquivo (ex.: ``transportadores_rntrc_12_2024.csv``); a data de cadastro de um
-# transportador nao diz a qual periodo o retrato pertence.
+# particao ``ano`` vem da linha, nao do arquivo. Conjunto ausente de
+# ``YEAR_COLUMNS`` usa a lista generica e, se nada casar, a primeira coluna com
+# cara de data.
+#
+# Fotografias/cadastros (``SNAPSHOT_DATASETS``) nao tem data de evento: a data de
+# cadastro de um transportador nao diz a qual periodo o retrato pertence. O ano
+# vem, nesta ordem, (1) do periodo declarado no nome do arquivo ou no nome
+# original da URL guardado no manifesto (``transportadores_rntrc_12_2024.csv`` ->
+# 2024) e (2) na falta dele (ex.: manifesto ausente, como no Drive, que guarda so
+# o bruto), do ano do carimbo ``@AAAAMMDD`` do nome local, ou seja, do ano em que
+# a fotografia foi tirada. Nenhuma linha e descartada. Limite conhecido do
+# passo (2): uma fotografia tirada em janeiro costuma retratar dezembro do ano
+# anterior. Conjuntos de eventos sem coluna de data continuam dando erro: so
+# fotografias caem no carimbo.
+SNAPSHOT_DATASETS = frozenset({"rntrc"})
 _GENERIC_YEAR_COLUMNS = (
     "data",
     "mes_ano",
@@ -165,9 +218,7 @@ _GENERIC_YEAR_COLUMNS = (
     "ano_mes",
     "ano",
 )
-YEAR_COLUMNS: dict[str, tuple[str, ...]] = {
-    "rntrc": (),
-}
+YEAR_COLUMNS: dict[str, tuple[str, ...]] = {}
 # Ultimo recurso, quando nenhuma coluna da lista acima existe (cada concessionaria
 # publica o seu CSV de acidentes, com cabecalhos ligeiramente diferentes): a
 # primeira coluna cujo nome diga ser uma data. Linha sem ano valido segue para a
@@ -175,6 +226,13 @@ YEAR_COLUMNS: dict[str, tuple[str, ...]] = {
 _DATE_LIKE_COLUMN = re.compile(r"^(data|dt)(_|$)|_data$|^mes_ano$")
 _ANO_MIN, _ANO_MAX = 1900, 2100
 _YEAR_TOKEN = re.compile(r"(?<!\d)((?:19|20)\d{2})(?!\d)")
+_STAMP_YEAR = re.compile(r"@((?:19|20)\d{2})\d{4}")
+
+
+def _stamp_year(filename: str) -> int | None:
+    """Ano do carimbo ``@AAAAMMDD`` do nome local; ``None`` se nao houver."""
+    match = _STAMP_YEAR.search(Path(filename.replace("\\", "/")).name)
+    return int(match[1]) if match else None
 
 
 def _declared_year(*names: str) -> int | None:
@@ -225,6 +283,40 @@ def _detect_dataset_id(filename: str) -> str | None:
     return None
 
 
+def _dataset_of(raw_name: str, label: str) -> str | None:
+    """Conjunto de um membro (``label``) do arquivo bruto ``raw_name``."""
+    if _slug_of(raw_name) in CATALOG:
+        return _detect_dataset_id(raw_name)
+    return _detect_dataset_id(label) or _detect_dataset_id(raw_name)
+
+
+# Extensoes que nunca viram tabela (documentacao, imagens, mapas).
+_NON_TABULAR_SUFFIXES = frozenset(
+    {".pdf", ".doc", ".docx", ".odt", ".txt", ".md", ".html", ".htm", ".png",
+     ".jpg", ".jpeg", ".gif", ".kml", ".kmz"}
+)  # fmt: skip
+# Conjuntos cujo arquivo e JSON (lista de registros), lido em vez do CSV gemeo.
+JSON_DATASETS: frozenset[str] = frozenset()
+
+
+def _is_readable(raw_file: Path) -> bool:
+    """Se o conversor sabe ler este arquivo solto (CSV, ou JSON de um conjunto
+    JSON)."""
+    suffix = raw_file.suffix.lower()
+    if suffix == ".csv":
+        return True
+    return suffix == ".json" and _slug_of(raw_file.name) in JSON_DATASETS
+
+
+def _json_twin(raw_file: Path) -> bool:
+    """O CSV tem um JSON da mesma publicacao (mesmo nome e carimbo) que o
+    conversor le no lugar dele?"""
+    return (
+        _slug_of(raw_file.name) in JSON_DATASETS
+        and raw_file.with_suffix(".json").is_file()
+    )
+
+
 def _source_url_name(raw_file: Path) -> str:
     """Nome do arquivo na URL de origem, lido do manifesto vizinho (``''`` se nao
     houver). O nome local ``<slug>@AAAAMMDD`` perde o periodo que a fonte poe no
@@ -246,6 +338,58 @@ class AnttLakeConverter:
     def datasets(self) -> list[str]:
         """Return available dataset identifiers."""
         return list(DATASETS)
+
+    def inventory(self, input_dir: Path) -> list[Planned]:
+        """Para cada arquivo bruto, o conjunto que ele alimenta ou o motivo de
+        ficar de fora (contrato de ``quantilica.core.lake.Planned``).
+
+        Versao antiga de um arquivo e ``superado``; arquivo que nao e tabular
+        (PDF, imagem...) e ``nao_tabular``. Arquivo de conjunto sem conversor
+        entra com ``dataset=None`` e sem motivo: e lacuna de cobertura, nao
+        exclusao deliberada.
+        """
+        root = Path(input_dir)
+        if not root.exists():
+            return []
+        files = sorted(
+            f
+            for f in root.rglob("*")
+            if f.is_file()
+            and not f.name.endswith(".manifest.json")
+            and not f.name.endswith(".tmp")
+        )
+        current = set(select_current(files))
+        plan: list[Planned] = []
+        for raw_file in files:
+            if raw_file not in current:
+                plan.append(Planned(raw_file, skip_reason="superado"))
+                continue
+            try:
+                names = _csv_member_names(raw_file)
+            except (OSError, zipfile.BadZipFile):
+                names = None
+            suffix = raw_file.suffix.lower()
+            if names is None and suffix in _NON_TABULAR_SUFFIXES:
+                plan.append(Planned(raw_file, skip_reason="nao_tabular"))
+                continue
+            if names is None and suffix == ".csv" and _json_twin(raw_file):
+                plan.append(Planned(raw_file, skip_reason="gemeo"))
+                continue
+            labels: list[str | None] = [None] if names is None else list(names)
+            ds_id = next(
+                (
+                    d
+                    for d in (
+                        _dataset_of(raw_file.name, n or raw_file.name) for n in labels
+                    )
+                    if d is not None
+                ),
+                None,
+            )
+            if ds_id is not None and names is None and not _is_readable(raw_file):
+                ds_id = None
+            plan.append(Planned(raw_file, dataset=ds_id))
+        return plan
 
     def convert(
         self,
@@ -288,27 +432,25 @@ class AnttLakeConverter:
             except (OSError, zipfile.BadZipFile) as exc:
                 res.errors.append(f"ANTT {raw_file.name}: ZIP ilegivel: {exc}")
                 continue
-            if names is None:  # CSV solto, sem ZIP
-                if raw_file.suffix.lower() != ".csv":
+            if names is None:  # arquivo solto, sem ZIP
+                if not _is_readable(raw_file):
                     continue
+                if raw_file.suffix.lower() == ".csv" and _json_twin(raw_file):
+                    continue  # gemeo: o conversor le o JSON
                 members: list[str | None] = [None]
             else:
                 members = list(names)
 
             for name in members:
                 label = name or raw_file.name
-                ds_id = (
-                    _detect_dataset_id(raw_file.name)
-                    if _slug_of(raw_file.name) in CATALOG
-                    else _detect_dataset_id(label) or _detect_dataset_id(raw_file.name)
-                )
+                ds_id = _dataset_of(raw_file.name, label)
                 if not ds_id or ds_id not in writers:
                     continue
                 # Cada membro e uma origem propria no lake (chave composta
                 # zip+membro): o sha256 do ZIP e o mesmo para todos os membros.
                 key = composite_file_key(raw_file, name).lower()
                 try:
-                    with _member_as_utf8(raw_file, name) as csv_path:
+                    with _member_as_text(raw_file, name) as csv_path:
                         self._convert_member(
                             writers[ds_id],
                             ds_id,
@@ -338,21 +480,27 @@ class AnttLakeConverter:
         """Escreve um membro, uma particao ``ano`` por vez (lazy, streaming)."""
         # Tudo como texto (convencao do lake): o esquema nao depende de quantas
         # linhas a inferencia viu e codigos nao perdem zeros a esquerda.
-        lf = pl.scan_csv(
-            csv_path,
-            separator=_detect_separator(csv_path),
-            infer_schema=False,
-            encoding="utf8",
-        )
+        if csv_path.suffix == ".ndjson":
+            lf = pl.scan_ndjson(csv_path, infer_schema_length=None).select(
+                pl.all().cast(pl.String)
+            )
+        else:
+            lf = pl.scan_csv(
+                csv_path,
+                separator=_detect_separator(csv_path),
+                infer_schema=False,
+                encoding="utf8",
+            )
         columns = lf.collect_schema().names()
         names = [_norm_col(c) for c in columns]
         lf = lf.rename({c: _norm_col(c) for c in columns})
         if lf.head(1).collect().height == 0:
             return
 
-        wanted = YEAR_COLUMNS.get(ds_id, _GENERIC_YEAR_COLUMNS)
+        snapshot = ds_id in SNAPSHOT_DATASETS
+        wanted = () if snapshot else YEAR_COLUMNS.get(ds_id, _GENERIC_YEAR_COLUMNS)
         source = next((c for c in wanted if c in names), None)
-        if source is None and ds_id not in YEAR_COLUMNS:
+        if source is None and not snapshot:
             source = next((c for c in names if _DATE_LIKE_COLUMN.search(c)), None)
         if source is not None:
             # Ano do registro, por linha. Linha sem ano valido NAO ganha ano
@@ -367,6 +515,15 @@ class AnttLakeConverter:
             declared = _declared_year(
                 label, raw_file.name.split("@", 1)[0], _source_url_name(raw_file)
             )
+            if declared is None and snapshot:
+                declared = _stamp_year(raw_file.name)
+                if declared is not None:
+                    logger.warning(
+                        "ANTT %s: sem periodo no nome original; fotografia "
+                        "particionada pelo ano do carimbo (%d)",
+                        label,
+                        declared,
+                    )
             if declared is None:
                 raise ValueError(
                     f"sem coluna de ano ({'/'.join(wanted) or 'nenhuma'}) e sem "
