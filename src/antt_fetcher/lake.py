@@ -48,6 +48,7 @@ DATASETS = [
     "investimentos",
     "praca-de-pedagio",
     "quantidade-possiveis-infratores",
+    "volume-radar",
 ]
 
 
@@ -231,6 +232,9 @@ YEAR_COLUMNS: dict[str, tuple[str, ...]] = {
     "vale-pedagio-obrigatorio": ("ano_de_emissao",),
     # Contagem de passagens por dia (radar): ano da data da passagem.
     "quantidade-possiveis-infratores": ("data_da_passagem",),
+    # Cada concessionaria publica o seu arquivo; a data pode vir como dd/mm/aaaa
+    # ou so mes/ano (02/2025), e o ano sai dos dois.
+    "volume-radar": ("data_da_passagem", "mes_ano", "data"),
 }
 # Ultimo recurso, quando nenhuma coluna da lista acima existe (cada concessionaria
 # publica o seu CSV de acidentes, com cabecalhos ligeiramente diferentes): a

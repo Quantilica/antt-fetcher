@@ -274,7 +274,6 @@ def test_conjuntos_sem_conversor_nao_caem_em_volume_pedagio(tmp_path: Path) -> N
     raw_dir = tmp_path / "raw" / "x"
     raw_dir.mkdir(parents=True)
     for slug in (
-        "volume-radar",
         "volume-sat",
         "volume-trafego-equivalente-praca-pedagio",
         "receita-por-praca",
@@ -456,3 +455,54 @@ def test_possiveis_infratores_particiona_por_data_da_passagem(
     assert df["velocidade"].to_list()[0] == "101 - 120 "
     (plan,) = converter.inventory(raw_dir.parent)
     assert plan.dataset == "quantidade-possiveis-infratores"
+
+
+# --- volume-radar -----------------------------------------------------------
+def test_volume_radar_particiona_por_data_da_passagem(tmp_path: Path) -> None:
+    raw_dir = _raw(tmp_path, "rodovias")
+    raw = raw_dir / "volume-radar@20260928.csv"
+    shutil.copy(_FIXTURES / "volume-radar.csv", raw)
+    with open(raw, "ab") as fh:  # mesmo conjunto, passagem de outro ano
+        fh.write(
+            b'"ECOVIAS DO ARAGUAIA";"X";"BR-80";"GO";94.500;"Vila";"Principal";'
+            b'-15.2;-48.7;"31/12/2025";"Crescente/Decrescente";1;"21 - 50 KM";'
+            b'"Carro";5\r\n'
+        )
+    res = converter.convert(raw_dir.parent, tmp_path / "lake")
+    assert not res.errors, res.errors
+    ds = tmp_path / "lake" / "antt" / "volume-radar"
+    assert _partitions(ds) == {"ano=2024": 3, "ano=2025": 1}
+    assert not check_dataset(ds)
+    df = pl.read_parquet(next((ds / "ano=2024").glob("*.parquet")))
+    assert "Vila Propício" in df["municipio"].to_list()
+    assert "Ônibus" in df["tipo_de_veiculo"].to_list()
+    (plan,) = converter.inventory(raw_dir.parent)
+    assert plan.dataset == "volume-radar"
+
+
+def test_volume_radar_mes_ano_extrai_o_ano(tmp_path: Path) -> None:
+    raw_dir = _raw(tmp_path, "rodovias")
+    (raw_dir / "volume-radar@20260928.csv").write_text(
+        "concessionaria;mes_ano;volume_total\nA;02/2025;15\nA;09/2025;423\n",
+        encoding="utf-8",
+    )
+    res = converter.convert(raw_dir.parent, tmp_path / "lake")
+    assert not res.errors, res.errors
+    assert _partitions(tmp_path / "lake" / "antt" / "volume-radar") == {"ano=2025": 2}
+
+
+def test_volume_radar_sem_cabecalho_da_erro_em_vez_de_inventar_ano(
+    tmp_path: Path,
+) -> None:
+    """Copia truncada, sem a linha de cabecalho: a 1a linha de dados viraria o
+    cabecalho. Sem coluna de data nao ha ano e o evento nao cai no carimbo."""
+    raw_dir = _raw(tmp_path, "rodovias")
+    (raw_dir / "volume-radar@20260928.csv").write_text(
+        '"AUTOPISTA LITORAL SUL";"ALS090";"BR-101";"SC";"Sao Jose";"Principal";15\n'
+        '"AUTOPISTA LITORAL SUL";"ALS138";"BR-376";"PR";"Guaratuba";"Principal";423\n',
+        encoding="utf-8",
+    )
+    res = converter.convert(raw_dir.parent, tmp_path / "lake")
+    assert len(res.errors) == 1
+    assert "particao por ano indeterminada" in res.errors[0]
+    assert not list((tmp_path / "lake").rglob("*.parquet"))
