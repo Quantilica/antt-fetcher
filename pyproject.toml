@@ -56,6 +56,7 @@ antt = "antt_fetcher.lake:converter"
 
 [dependency-groups]
 dev = [
+    "pyright>=1.1.400",
     "ruff>=0.9.0",
     "pytest>=8.0.0",
     "pytest-cov",
@@ -86,3 +87,15 @@ build-backend = "hatchling.build"
 [tool.ruff.lint.per-file-ignores]
 # títulos de pacotes do CKAN são literais longos
 "src/antt_fetcher/catalog_*.py" = ["E501"]
+
+[tool.pyright]
+typeCheckingMode = "basic"
+include = ["src"]
+
+[tool.coverage.run]
+source = ["antt_fetcher"]
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true
+skip_covered = true
