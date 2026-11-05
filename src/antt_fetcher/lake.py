@@ -44,6 +44,7 @@ DATASETS = [
     "monitriip-servico-regular-paradas",
     "relatorio-acompanhamento-acidentes-ferroviarios-raaf",
     "ciot",
+    "vale-pedagio-obrigatorio",
 ]
 
 
@@ -219,7 +220,10 @@ _GENERIC_YEAR_COLUMNS = (
     "ano_mes",
     "ano",
 )
-YEAR_COLUMNS: dict[str, tuple[str, ...]] = {}
+YEAR_COLUMNS: dict[str, tuple[str, ...]] = {
+    # Serie mensal agregada; "Ano de Emissao" e o ano do registro.
+    "vale-pedagio-obrigatorio": ("ano_de_emissao",),
+}
 # Ultimo recurso, quando nenhuma coluna da lista acima existe (cada concessionaria
 # publica o seu CSV de acidentes, com cabecalhos ligeiramente diferentes): a
 # primeira coluna cujo nome diga ser uma data. Linha sem ano valido segue para a

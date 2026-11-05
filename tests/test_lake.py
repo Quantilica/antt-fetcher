@@ -274,7 +274,6 @@ def test_conjuntos_sem_conversor_nao_caem_em_volume_pedagio(tmp_path: Path) -> N
     raw_dir = tmp_path / "raw" / "x"
     raw_dir.mkdir(parents=True)
     for slug in (
-        "vale-pedagio-obrigatorio",
         "praca-de-pedagio",
         "volume-radar",
         "volume-sat",
@@ -377,3 +376,22 @@ def test_ciot_sem_manifesto_usa_o_carimbo_e_inventory_o_lista(
     assert _partitions(tmp_path / "lake" / "antt" / "ciot") == {"ano=2026": 4}
     (plan,) = converter.inventory(raw_dir.parent)
     assert plan.dataset == "ciot"
+
+
+# --- vale-pedagio-obrigatorio ----------------------------------------------
+def test_vale_pedagio_particiona_por_ano_de_emissao(tmp_path: Path) -> None:
+    raw_dir = _raw(tmp_path, "cargas")
+    shutil.copy(
+        _FIXTURES / "vale-pedagio-obrigatorio.csv",
+        raw_dir / "vale-pedagio-obrigatorio@20261006.csv",
+    )
+    res = converter.convert(raw_dir.parent, tmp_path / "lake")
+    assert not res.errors, res.errors
+    ds = tmp_path / "lake" / "antt" / "vale-pedagio-obrigatorio"
+    assert _partitions(ds) == {"ano=2025": 3, "ano=2026": 1}
+    assert not check_dataset(ds)
+    df = pl.read_parquet(next((ds / "ano=2025").glob("*.parquet")))
+    assert "mes_de_emissao" in df.columns
+    assert df["valor_dos_vpos"].to_list()[0] == "2083658.08"
+    (plan,) = converter.inventory(raw_dir.parent)
+    assert plan.dataset == "vale-pedagio-obrigatorio"
