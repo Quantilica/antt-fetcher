@@ -13,7 +13,8 @@ e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR
 - `lake`: `inventory()` informa, para cada arquivo bruto, o conjunto que ele alimenta ou o motivo de ficar de fora (`superado`, `nao_tabular`, `gemeo`); arquivo de conjunto ainda sem conversor aparece sem conjunto e sem motivo.
 
 ### Corrigido
-- `lake`: `rntrc@AAAAMMDD.csv` falhava com "particao por ano indeterminada" quando o manifesto vizinho nao estava presente (o Drive guarda so o arquivo bruto). Para fotografias/cadastros (`rntrc`, `ciot`, `praca-de-pedagio`), sem periodo no nome original, o ano passa a ser o do carimbo `@AAAAMMDD`, com aviso no log e sem descartar linhas. O periodo do nome original continua tendo preferencia. Limite conhecido: fotografia tirada em janeiro costuma retratar dezembro do ano anterior. Conjunto de eventos sem coluna de data continua dando erro.
+- `lake`: o `rntrc` e o `ciot` (fotografias/agregados sem data de evento) continuam particionando pelo periodo do nome original da URL, lido do manifesto (`.manifest.json`) ao lado do arquivo. Sem o manifesto (ou sem periodo nele) o erro e explicito e diz que o manifesto precisa estar ao lado do arquivo; nenhum ano e inventado. Foi o que fez `rntrc@20261010.csv` falhar quando o bruto estava sozinho no Drive.
+- `lake`: `praca-de-pedagio` (cadastro das pracas, sem periodo no nome nem na URL) particiona pelo ano do carimbo `@AAAAMMDD`, com aviso no log e sem descartar linhas; `ano_do_pnv_snv` e a versao do mapa e nao serve de ano.
 
 ## [0.2.1] - 2026-11-04
 

@@ -241,24 +241,20 @@ def test_rntrc_snapshot_usa_periodo_do_nome_original_no_manifest(
     assert _partitions(tmp_path / "lake" / "antt" / "rntrc") == {"ano=2020": 2}
 
 
-def test_rntrc_sem_manifesto_particiona_pelo_ano_do_carimbo(
-    tmp_path: Path, caplog
-) -> None:
-    """Sem periodo no nome (manifesto ausente, como no Drive), a fotografia
-    cai no ano do carimbo @AAAAMMDD, sem descartar linhas, e avisa no log."""
+def test_rntrc_sem_manifesto_da_erro_explicito(tmp_path: Path) -> None:
+    """Sem manifesto (periodo do nome original), nao ha ano inventado nem
+    fallback no carimbo: erro dizendo que o manifesto precisa estar ao lado."""
     raw_dir = _raw(tmp_path, "cargas")
     shutil.copy(_FIXTURES / "rntrc.csv", raw_dir / "rntrc@20261010.csv")
-    with caplog.at_level("WARNING"):
-        res = converter.convert(raw_dir.parent, tmp_path / "lake")
-    assert not res.errors, res.errors
-    ds = tmp_path / "lake" / "antt" / "rntrc"
-    assert _partitions(ds) == {"ano=2026": 2}
-    assert "ano do carimbo (2026)" in caplog.text
-    assert not check_dataset(ds)
+    res = converter.convert(raw_dir.parent, tmp_path / "lake")
+    assert len(res.errors) == 1
+    assert "particao por ano indeterminada" in res.errors[0]
+    assert "manifesto" in res.errors[0] and "ao lado do arquivo" in res.errors[0]
+    assert not list((tmp_path / "lake").rglob("*.parquet"))
 
 
-def test_rntrc_manifesto_com_periodo_vence_o_carimbo(tmp_path: Path) -> None:
-    """O periodo do nome original (09_2026) manda; o carimbo e so o ultimo recurso."""
+def test_rntrc_manifesto_com_periodo_define_o_ano(tmp_path: Path) -> None:
+    """O periodo do nome original (12_2020) manda, mesmo com carimbo de 2021."""
     raw_dir = _raw(tmp_path, "cargas")
     raw = raw_dir / "rntrc@20210101.csv"
     shutil.copy(_FIXTURES / "rntrc.csv", raw)
@@ -363,14 +359,13 @@ def test_ciot_particiona_pelo_periodo_do_nome_original(tmp_path: Path) -> None:
     assert df.schema["quantidade_ciots"] == pl.String
 
 
-def test_ciot_sem_manifesto_usa_o_carimbo_e_inventory_o_lista(
-    tmp_path: Path,
-) -> None:
+def test_ciot_sem_manifesto_da_erro_e_inventory_o_lista(tmp_path: Path) -> None:
     raw_dir = _raw(tmp_path, "cargas")
     shutil.copy(_FIXTURES / "ciot.csv", raw_dir / "ciot@20261010.csv")
     res = converter.convert(raw_dir.parent, tmp_path / "lake")
-    assert not res.errors, res.errors
-    assert _partitions(tmp_path / "lake" / "antt" / "ciot") == {"ano=2026": 4}
+    assert len(res.errors) == 1
+    assert "ao lado do arquivo" in res.errors[0]
+    assert not list((tmp_path / "lake").rglob("*.parquet"))
     (plan,) = converter.inventory(raw_dir.parent)
     assert plan.dataset == "ciot"
 

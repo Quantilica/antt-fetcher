@@ -200,18 +200,18 @@ def _detect_separator(csv_path: Path) -> str:
 #
 # Fotografias/cadastros (``SNAPSHOT_DATASETS``) nao tem data de evento: a data de
 # cadastro de um transportador nao diz a qual periodo o retrato pertence. O ano
-# vem, nesta ordem, (1) do periodo declarado no nome do arquivo ou no nome
-# original da URL guardado no manifesto (``transportadores_rntrc_12_2024.csv`` ->
-# 2024) e (2) na falta dele (ex.: manifesto ausente, como no Drive, que guarda so
-# o bruto), do ano do carimbo ``@AAAAMMDD`` do nome local, ou seja, do ano em que
-# a fotografia foi tirada. Nenhuma linha e descartada. Limite conhecido do
-# passo (2): uma fotografia tirada em janeiro costuma retratar dezembro do ano
-# anterior. Conjuntos de eventos sem coluna de data continuam dando erro: so
-# fotografias caem no carimbo.
-# ``praca-de-pedagio`` e o cadastro das pracas: ``ano_do_pnv_snv`` e a versao do
-# mapa da malha, nao o ano do registro, e ``data_da_inativacao`` quase sempre vem
-# vazia; por isso o ano e o da fotografia.
+# vem do periodo declarado no nome do arquivo ou no nome original da URL guardado
+# no manifesto (``transportadores_rntrc_12_2024.csv`` -> 2024). Sem periodo (ex.:
+# manifesto fora do lugar) o resultado e erro explicito: nada de ano inventado;
+# o manifesto precisa estar ao lado do arquivo.
+#
+# Unica excecao, ``STAMP_YEAR_DATASETS``: ``praca-de-pedagio`` e o cadastro das
+# pracas, sem periodo no nome nem na URL; ``ano_do_pnv_snv`` e a versao do mapa
+# da malha, nao o ano do registro, e ``data_da_inativacao`` quase sempre vem
+# vazia. O ano e o do carimbo ``@AAAAMMDD`` (quando a fotografia foi tirada), com
+# aviso no log e sem descartar linhas.
 SNAPSHOT_DATASETS = frozenset({"rntrc", "ciot", "praca-de-pedagio"})
+STAMP_YEAR_DATASETS = frozenset({"praca-de-pedagio"})
 _GENERIC_YEAR_COLUMNS = (
     "data",
     "mes_ano",
@@ -539,7 +539,7 @@ class AnttLakeConverter:
             declared = _declared_year(
                 label, raw_file.name.split("@", 1)[0], _source_url_name(raw_file)
             )
-            if declared is None and snapshot:
+            if declared is None and ds_id in STAMP_YEAR_DATASETS:
                 declared = _stamp_year(raw_file.name)
                 if declared is not None:
                     logger.warning(
@@ -552,6 +552,12 @@ class AnttLakeConverter:
                 raise ValueError(
                     f"sem coluna de ano ({'/'.join(wanted) or 'nenhuma'}) e sem "
                     "ano unico no nome do arquivo: particao por ano indeterminada"
+                    + (
+                        "; o manifesto (.manifest.json) precisa estar ao lado do "
+                        "arquivo para informar o periodo do nome original"
+                        if snapshot
+                        else ""
+                    )
                 )
             ano = pl.lit(declared, dtype=pl.Int32)
         lf = lf.with_columns(ano.cast(pl.Int32).alias("ano"))
