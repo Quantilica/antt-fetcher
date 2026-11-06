@@ -1,0 +1,4 @@
+concessionaria;identificador;rodovia;uf;km_m;municipio;tipo_de_pista;latitude;longitude;data_da_passagem;sentido_da_passagem;faixa_da_passagem;velocidade;tipo_de_veiculo;volume_total
+"ECOVIAS DO ARAGUAIA";"BR-080 KM 094 + 500 (SNV)";"BR-80";"GO";94.500;"Vila Propício";"Principal";-15.208355;-48.701911;"16/07/2024";"Crescente/Decrescente";1;"21 - 50 KM";"Ônibus";287
+"ECOVIAS DO ARAGUAIA";"BR-080 KM 094 + 500 (SNV)";"BR-80";"GO";94.500;"Vila Propício";"Principal";-15.208355;-48.701911;"16/07/2024";"Crescente/Decrescente";1;"<= 20 KM/h";"Ônibus";149
+"ECOVIAS DO ARAGUAIA";"BR-080 KM 094 + 500 (SNV)";"BR-80";"GO";94.500;"Vila Propício";"Principal";-15.208355;-48.701911;"16/07/2024";"Crescente/Decrescente";2;"21 - 50 KM";"Passeio";1027

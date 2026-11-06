@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 import zipfile
 from pathlib import Path
 
@@ -9,6 +10,14 @@ import polars as pl
 from quantilica.analytics.lake import check_dataset
 
 from antt_fetcher.lake import converter
+
+_FIXTURES = Path(__file__).parent / "fixtures" / "lake"
+
+
+def _raw(tmp_path: Path, group: str) -> Path:
+    raw_dir = tmp_path / "raw" / group
+    raw_dir.mkdir(parents=True)
+    return raw_dir
 
 
 def test_converter_metadata() -> None:
@@ -232,16 +241,31 @@ def test_rntrc_snapshot_usa_periodo_do_nome_original_no_manifest(
     assert _partitions(tmp_path / "lake" / "antt" / "rntrc") == {"ano=2020": 2}
 
 
-def test_rntrc_sem_periodo_conhecido_nao_inventa_ano(tmp_path: Path) -> None:
-    raw_dir = tmp_path / "raw" / "cargas"
-    raw_dir.mkdir(parents=True)
-    (raw_dir / "rntrc@20201101.csv").write_text("rntrc\n1\n", encoding="utf-8")
+def test_rntrc_sem_manifesto_particiona_pelo_ano_do_carimbo(
+    tmp_path: Path, caplog
+) -> None:
+    """Sem periodo no nome (manifesto ausente, como no Drive), a fotografia
+    cai no ano do carimbo @AAAAMMDD, sem descartar linhas, e avisa no log."""
+    raw_dir = _raw(tmp_path, "cargas")
+    shutil.copy(_FIXTURES / "rntrc.csv", raw_dir / "rntrc@20261010.csv")
+    with caplog.at_level("WARNING"):
+        res = converter.convert(raw_dir.parent, tmp_path / "lake")
+    assert not res.errors, res.errors
+    ds = tmp_path / "lake" / "antt" / "rntrc"
+    assert _partitions(ds) == {"ano=2026": 2}
+    assert "ano do carimbo (2026)" in caplog.text
+    assert not check_dataset(ds)
+
+
+def test_rntrc_manifesto_com_periodo_vence_o_carimbo(tmp_path: Path) -> None:
+    """O periodo do nome original (09_2026) manda; o carimbo e so o ultimo recurso."""
+    raw_dir = _raw(tmp_path, "cargas")
+    raw = raw_dir / "rntrc@20210101.csv"
+    shutil.copy(_FIXTURES / "rntrc.csv", raw)
+    _write_manifest(raw, "https://x/download/transportadores_rntrc_12_2020.csv")
     res = converter.convert(raw_dir.parent, tmp_path / "lake")
-    assert len(res.errors) == 1
-    assert "particao por ano indeterminada" in res.errors[0]
-    assert not (tmp_path / "lake" / "antt" / "rntrc").exists() or not list(
-        (tmp_path / "lake" / "antt" / "rntrc").rglob("*.parquet")
-    )
+    assert not res.errors, res.errors
+    assert _partitions(tmp_path / "lake" / "antt" / "rntrc") == {"ano=2020": 2}
 
 
 def test_conjuntos_sem_conversor_nao_caem_em_volume_pedagio(tmp_path: Path) -> None:
@@ -250,10 +274,6 @@ def test_conjuntos_sem_conversor_nao_caem_em_volume_pedagio(tmp_path: Path) -> N
     raw_dir = tmp_path / "raw" / "x"
     raw_dir.mkdir(parents=True)
     for slug in (
-        "vale-pedagio-obrigatorio",
-        "praca-de-pedagio",
-        "volume-radar",
-        "volume-sat",
         "volume-trafego-equivalente-praca-pedagio",
         "receita-por-praca",
         "acidentes-quilometro-rodovias",
@@ -291,3 +311,313 @@ def test_cp1252_com_bytes_indefinidos_nao_quebra(tmp_path: Path) -> None:
     assert not res.errors, res.errors
     ds = tmp_path / "lake" / "antt" / "acidentes-rodovias"
     assert _partitions(ds) == {"ano=2020": 2}
+
+
+# --- inventory() -------------------------------------------------------------
+def test_inventory_classifica_arquivos(tmp_path: Path) -> None:
+    raw_dir = _raw(tmp_path, "cargas")
+    (raw_dir / "rntrc@20260901.csv").write_text("a\n1\n", encoding="utf-8")
+    (raw_dir / "rntrc@20261001.csv").write_text("a\n1\n", encoding="utf-8")
+    (raw_dir / "rntrc@20261001.csv.manifest.json").write_text("{}", encoding="utf-8")
+    (raw_dir / "dicionario@20261001.pdf").write_bytes(b"%PDF")
+    (raw_dir / "receita-por-praca@20261001.csv").write_text("a\n1\n", "utf-8")
+
+    plan = {p.path.name: p for p in converter.inventory(raw_dir.parent)}
+    assert "rntrc@20261001.csv.manifest.json" not in plan
+    assert plan["rntrc@20260901.csv"].skip_reason == "superado"
+    assert plan["rntrc@20261001.csv"].dataset == "rntrc"
+    assert plan["rntrc@20261001.csv"].skip_reason is None
+    assert plan["dicionario@20261001.pdf"].skip_reason == "nao_tabular"
+    # Sem conversor: lacuna de cobertura, nao exclusao deliberada.
+    assert plan["receita-por-praca@20261001.csv"].dataset is None
+    assert plan["receita-por-praca@20261001.csv"].skip_reason is None
+
+
+def test_inventory_zip_e_diretorio_inexistente(tmp_path: Path) -> None:
+    assert converter.inventory(tmp_path / "nao-existe") == []
+    raw_dir = _raw(tmp_path, "rodovias")
+    with zipfile.ZipFile(raw_dir / "acidentes_2024@20261101.zip", "w") as zf:
+        zf.writestr("acidentes_rodovias_2024.csv", "data\n01/01/2024\n")
+    (raw_dir / "quebrado@20261101.zip").write_bytes(b"PK\x03\x04lixo")
+    plan = {p.path.name: p for p in converter.inventory(raw_dir.parent)}
+    assert plan["acidentes_2024@20261101.zip"].dataset == "acidentes-rodovias"
+    assert plan["quebrado@20261101.zip"].dataset is None
+
+
+# --- ciot -------------------------------------------------------------------
+def test_ciot_particiona_pelo_periodo_do_nome_original(tmp_path: Path) -> None:
+    """CIOT e agregado mensal por origem/destino, sem data: o ano vem do periodo
+    do nome original (09_2026_ciots.csv) e o texto cp1252 e preservado."""
+    raw_dir = _raw(tmp_path, "cargas")
+    raw = raw_dir / "ciot@20261010.csv"
+    shutil.copy(_FIXTURES / "ciot.csv", raw)
+    _write_manifest(raw, "https://x/download/09_2026_ciots.csv")
+    res = converter.convert(raw_dir.parent, tmp_path / "lake")
+    assert not res.errors, res.errors
+    ds = tmp_path / "lake" / "antt" / "ciot"
+    assert _partitions(ds) == {"ano=2026": 4}
+    assert not check_dataset(ds)
+    df = pl.read_parquet(next(ds.rglob("*.parquet")))
+    assert df.columns[:3] == ["municipio_origem", "uf_origem", "municipio_destino"]
+    assert "Paulínia" in df["municipio_destino"].to_list()
+    assert df.schema["quantidade_ciots"] == pl.String
+
+
+def test_ciot_sem_manifesto_usa_o_carimbo_e_inventory_o_lista(
+    tmp_path: Path,
+) -> None:
+    raw_dir = _raw(tmp_path, "cargas")
+    shutil.copy(_FIXTURES / "ciot.csv", raw_dir / "ciot@20261010.csv")
+    res = converter.convert(raw_dir.parent, tmp_path / "lake")
+    assert not res.errors, res.errors
+    assert _partitions(tmp_path / "lake" / "antt" / "ciot") == {"ano=2026": 4}
+    (plan,) = converter.inventory(raw_dir.parent)
+    assert plan.dataset == "ciot"
+
+
+# --- vale-pedagio-obrigatorio ----------------------------------------------
+def test_vale_pedagio_particiona_por_ano_de_emissao(tmp_path: Path) -> None:
+    raw_dir = _raw(tmp_path, "cargas")
+    shutil.copy(
+        _FIXTURES / "vale-pedagio-obrigatorio.csv",
+        raw_dir / "vale-pedagio-obrigatorio@20261006.csv",
+    )
+    res = converter.convert(raw_dir.parent, tmp_path / "lake")
+    assert not res.errors, res.errors
+    ds = tmp_path / "lake" / "antt" / "vale-pedagio-obrigatorio"
+    assert _partitions(ds) == {"ano=2025": 3, "ano=2026": 1}
+    assert not check_dataset(ds)
+    df = pl.read_parquet(next((ds / "ano=2025").glob("*.parquet")))
+    assert "mes_de_emissao" in df.columns
+    assert df["valor_dos_vpos"].to_list()[0] == "2083658.08"
+    (plan,) = converter.inventory(raw_dir.parent)
+    assert plan.dataset == "vale-pedagio-obrigatorio"
+
+
+# --- investimentos ----------------------------------------------------------
+def test_investimentos_particiona_pela_coluna_ano(tmp_path: Path) -> None:
+    raw_dir = _raw(tmp_path, "rodovias")
+    shutil.copy(_FIXTURES / "investimentos.csv", raw_dir / "investimentos@20260522.csv")
+    res = converter.convert(raw_dir.parent, tmp_path / "lake")
+    assert not res.errors, res.errors
+    ds = tmp_path / "lake" / "antt" / "investimentos"
+    assert _partitions(ds) == {"ano=2010": 3, "ano=2025": 1}
+    assert not check_dataset(ds)
+    df = pl.read_parquet(next((ds / "ano=2010").glob("*.parquet")))
+    assert {"concessionaria", "valor"} <= set(df.columns)
+    assert "AUTOPISTA FERNÃO DIAS" in df["concessionaria"].to_list()
+    (plan,) = converter.inventory(raw_dir.parent)
+    assert plan.dataset == "investimentos"
+
+
+# --- praca-de-pedagio -------------------------------------------------------
+def test_praca_de_pedagio_cadastro_particiona_pelo_carimbo(tmp_path: Path) -> None:
+    """Cadastro de pracas: ano_do_pnv_snv (2019) e versao do mapa, nao o ano do
+    registro; o ano e o da fotografia (carimbo), sem descartar linhas."""
+    raw_dir = _raw(tmp_path, "rodovias")
+    shutil.copy(
+        _FIXTURES / "praca-de-pedagio.csv", raw_dir / "praca-de-pedagio@20261103.csv"
+    )
+    res = converter.convert(raw_dir.parent, tmp_path / "lake")
+    assert not res.errors, res.errors
+    ds = tmp_path / "lake" / "antt" / "praca-de-pedagio"
+    assert _partitions(ds) == {"ano=2026": 3}
+    assert not check_dataset(ds)
+    df = pl.read_parquet(next(ds.rglob("*.parquet")))
+    assert df["ano_do_pnv_snv"].to_list() == ["2019"] * 3
+    assert df["latitude"].to_list()[0] == "-21.552594"
+    (plan,) = converter.inventory(raw_dir.parent)
+    assert plan.dataset == "praca-de-pedagio"
+
+
+# --- quantidade-possiveis-infratores ---------------------------------------
+def test_possiveis_infratores_particiona_por_data_da_passagem(
+    tmp_path: Path,
+) -> None:
+    raw_dir = _raw(tmp_path, "rodovias")
+    raw = raw_dir / "quantidade-possiveis-infratores@20261028.csv"
+    shutil.copy(_FIXTURES / "quantidade-possiveis-infratores.csv", raw)
+    # Uma passagem de dez/2025 junto das de jan/2026: cada linha no seu ano.
+    with open(raw, "ab") as fh:
+        fh.write(
+            b'"VIA CRISTAIS";"D0880";"BR-40";"MG";462.950;"Sete Lagoas";"Principal";'
+            b'-19.420795;-44.339028;"31/12/2025";"Crescente";1;"101 - 120 ";'
+            b'"Comercial";2\r\n'
+        )
+    res = converter.convert(raw_dir.parent, tmp_path / "lake")
+    assert not res.errors, res.errors
+    ds = tmp_path / "lake" / "antt" / "quantidade-possiveis-infratores"
+    assert _partitions(ds) == {"ano=2025": 1, "ano=2026": 3}
+    assert not check_dataset(ds)
+    df = pl.read_parquet(next((ds / "ano=2026").glob("*.parquet")))
+    assert "Veículo Médio" in df["tipo_de_veiculo"].to_list()
+    assert df["velocidade"].to_list()[0] == "101 - 120 "
+    (plan,) = converter.inventory(raw_dir.parent)
+    assert plan.dataset == "quantidade-possiveis-infratores"
+
+
+# --- volume-radar -----------------------------------------------------------
+def test_volume_radar_particiona_por_data_da_passagem(tmp_path: Path) -> None:
+    raw_dir = _raw(tmp_path, "rodovias")
+    raw = raw_dir / "volume-radar@20260928.csv"
+    shutil.copy(_FIXTURES / "volume-radar.csv", raw)
+    with open(raw, "ab") as fh:  # mesmo conjunto, passagem de outro ano
+        fh.write(
+            b'"ECOVIAS DO ARAGUAIA";"X";"BR-80";"GO";94.500;"Vila";"Principal";'
+            b'-15.2;-48.7;"31/12/2025";"Crescente/Decrescente";1;"21 - 50 KM";'
+            b'"Carro";5\r\n'
+        )
+    res = converter.convert(raw_dir.parent, tmp_path / "lake")
+    assert not res.errors, res.errors
+    ds = tmp_path / "lake" / "antt" / "volume-radar"
+    assert _partitions(ds) == {"ano=2024": 3, "ano=2025": 1}
+    assert not check_dataset(ds)
+    df = pl.read_parquet(next((ds / "ano=2024").glob("*.parquet")))
+    assert "Vila Propício" in df["municipio"].to_list()
+    assert "Ônibus" in df["tipo_de_veiculo"].to_list()
+    (plan,) = converter.inventory(raw_dir.parent)
+    assert plan.dataset == "volume-radar"
+
+
+def test_volume_radar_mes_ano_extrai_o_ano(tmp_path: Path) -> None:
+    raw_dir = _raw(tmp_path, "rodovias")
+    (raw_dir / "volume-radar@20260928.csv").write_text(
+        "concessionaria;mes_ano;volume_total\nA;02/2025;15\nA;09/2025;423\n",
+        encoding="utf-8",
+    )
+    res = converter.convert(raw_dir.parent, tmp_path / "lake")
+    assert not res.errors, res.errors
+    assert _partitions(tmp_path / "lake" / "antt" / "volume-radar") == {"ano=2025": 2}
+
+
+def test_volume_radar_sem_cabecalho_da_erro_em_vez_de_inventar_ano(
+    tmp_path: Path,
+) -> None:
+    """Copia truncada, sem a linha de cabecalho: a 1a linha de dados viraria o
+    cabecalho. Sem coluna de data nao ha ano e o evento nao cai no carimbo."""
+    raw_dir = _raw(tmp_path, "rodovias")
+    (raw_dir / "volume-radar@20260928.csv").write_text(
+        '"AUTOPISTA LITORAL SUL";"ALS090";"BR-101";"SC";"Sao Jose";"Principal";15\n'
+        '"AUTOPISTA LITORAL SUL";"ALS138";"BR-376";"PR";"Guaratuba";"Principal";423\n',
+        encoding="utf-8",
+    )
+    res = converter.convert(raw_dir.parent, tmp_path / "lake")
+    assert len(res.errors) == 1
+    assert "particao por ano indeterminada" in res.errors[0]
+    assert not list((tmp_path / "lake").rglob("*.parquet"))
+
+
+# --- volume-sat (JSON e CSV gemeo) -----------------------------------------
+def test_volume_sat_json_multidocumento_particiona_por_ano(tmp_path: Path) -> None:
+    raw_dir = _raw(tmp_path, "rodovias")
+    shutil.copy(_FIXTURES / "volume-sat.json", raw_dir / "volume-sat@20261103.json")
+    res = converter.convert(raw_dir.parent, tmp_path / "lake")
+    assert not res.errors, res.errors
+    ds = tmp_path / "lake" / "antt" / "volume-sat"
+    assert _partitions(ds) == {"ano=2024": 1, "ano=2025": 2, "ano=2026": 2}
+    assert not check_dataset(ds)
+    df = pl.read_parquet(next((ds / "ano=2025").glob("*.parquet")))
+    assert df.schema["volume_total"] == pl.String  # tudo texto, como no CSV
+    assert "ELOVIAS" in df["concessionaria"].to_list()
+    assert "Duque de Caxias" in df["municipio"].to_list()
+    # Reconversao idempotente.
+    again = converter.convert(raw_dir.parent, tmp_path / "lake")
+    assert again.converted == 0 and again.skipped == 3
+
+
+def test_volume_sat_csv_e_gemeo_do_json_de_mesmo_carimbo(tmp_path: Path) -> None:
+    raw_dir = _raw(tmp_path, "rodovias")
+    shutil.copy(_FIXTURES / "volume-sat.json", raw_dir / "volume-sat@20261103.json")
+    shutil.copy(_FIXTURES / "volume-sat.csv", raw_dir / "volume-sat@20261103.csv")
+    res = converter.convert(raw_dir.parent, tmp_path / "lake")
+    assert not res.errors, res.errors
+    ds = tmp_path / "lake" / "antt" / "volume-sat"
+    assert sum(_partitions(ds).values()) == 5  # so o JSON; sem duplicar o CSV
+    plan = {p.path.name: p for p in converter.inventory(raw_dir.parent)}
+    assert plan["volume-sat@20261103.json"].dataset == "volume-sat"
+    assert plan["volume-sat@20261103.json"].skip_reason is None
+    assert plan["volume-sat@20261103.csv"].skip_reason == "gemeo"
+
+
+def test_volume_sat_csv_sozinho_converte_por_data_de_passagem(
+    tmp_path: Path,
+) -> None:
+    raw_dir = _raw(tmp_path, "rodovias")
+    shutil.copy(_FIXTURES / "volume-sat.csv", raw_dir / "volume-sat@20261103.csv")
+    res = converter.convert(raw_dir.parent, tmp_path / "lake")
+    assert not res.errors, res.errors
+    ds = tmp_path / "lake" / "antt" / "volume-sat"
+    assert _partitions(ds) == {"ano=2025": 3}
+    (plan,) = converter.inventory(raw_dir.parent)
+    assert plan.dataset == "volume-sat" and plan.skip_reason is None
+
+
+def test_volume_sat_json_fora_do_formato_da_erro(tmp_path: Path) -> None:
+    raw_dir = _raw(tmp_path, "rodovias")
+    (raw_dir / "volume-sat@20261103.json").write_text(
+        '{"volume_sat":[{"data_de_passagem":"2025-01-01"},\nlixo\n]}\n',
+        encoding="utf-8",
+    )
+    res = converter.convert(raw_dir.parent, tmp_path / "lake")
+    assert len(res.errors) == 1
+    assert "um registro por linha" in res.errors[0]
+    assert not list((tmp_path / "lake").rglob("*.parquet"))
+
+
+# --- conjunto pelo prefixo do slug -----------------------------------------
+def test_conjunto_reconhecido_com_e_sem_identificador_de_recurso() -> None:
+    from antt_fetcher.lake import _detect_dataset_id, _slug_of
+
+    assert _detect_dataset_id("ciot@20261010.csv") == "ciot"
+    assert _detect_dataset_id("ciot_09-2026-ciots-1a2b3c4d@20261010.csv") == "ciot"
+    assert (
+        _detect_dataset_id("volume-radar_radar-x-1a2b3c4d@20260928.csv")
+        == "volume-radar"
+    )
+    assert _detect_dataset_id("receita-por-praca_x-1a2b3c4d@20260928.csv") is None
+    assert _slug_of("volume-radar_radar-x-1a2b3c4d@20260928.csv") == "volume-radar"
+    assert _slug_of("rntrc_2024@20261010.csv") == "rntrc"
+    assert _slug_of("volume-radar@20260928.csv") == "volume-radar"
+    # maior prefixo: nao confunde com outro conjunto de prefixo comum
+    assert (
+        _slug_of("volume-trafego-equivalente-praca-pedagio_a-12345678@20260928.csv")
+        == "volume-trafego-equivalente-praca-pedagio"
+    )
+    # sem slug conhecido, segue o comportamento antigo
+    assert _slug_of("qualquer@20260101.csv") == "qualquer"
+    assert _slug_of("sem-carimbo.csv") == ""
+    # equivalente-praca-pedagio nao cai na heuristica de "volume"/"pedagio"
+    assert (
+        _detect_dataset_id(
+            "volume-trafego-equivalente-praca-pedagio_a-12345678@20260928.csv"
+        )
+        is None
+    )
+
+
+def test_ciot_com_identificador_converte_e_recursos_nao_colidem(
+    tmp_path: Path,
+) -> None:
+    raw_dir = _raw(tmp_path, "cargas")
+    a = raw_dir / "ciot_09-2026-ciots-aaaa1111@20261010.csv"
+    b = raw_dir / "ciot_08-2026-ciots-bbbb2222@20261010.csv"
+    shutil.copy(_FIXTURES / "ciot.csv", a)
+    shutil.copy(_FIXTURES / "ciot.csv", b)
+    plans = converter.inventory(raw_dir.parent)
+    assert {p.dataset for p in plans} == {"ciot"}
+    res = converter.convert(raw_dir.parent, tmp_path / "lake")
+    assert not res.errors, res.errors
+    assert _partitions(tmp_path / "lake" / "antt" / "ciot") == {"ano=2026": 8}
+
+
+def test_equivalente_praca_pedagio_com_identificador_e_ignorado(
+    tmp_path: Path,
+) -> None:
+    raw_dir = _raw(tmp_path, "rodovias")
+    shutil.copy(
+        _FIXTURES / "ciot.csv",
+        raw_dir / "volume-trafego-equivalente-praca-pedagio_a-12345678@20260928.csv",
+    )
+    res = converter.convert(raw_dir.parent, tmp_path / "lake")
+    assert not res.errors, res.errors
+    assert not (tmp_path / "lake" / "antt" / "volume-trafego-praca-pedagio").exists()

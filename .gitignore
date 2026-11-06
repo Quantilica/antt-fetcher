@@ -43,4 +43,4 @@ htmlcov/
 uv.lock
 .backfill/
 data/
-lake/
+/lake/

@@ -1,0 +1,4 @@
+concessionaria;identificador;rodovia;uf;km_m;municipio;tipo_de_pista;latitude;longitude;data_de_passagem;sentido_da_passagem;faixa_da_passagem;faixa_de_velocidade;tipo_de_veiculo;volume_total
+"NOVA ROTA DO OESTE";"SAT1";"BR-163";"MT";0.700;"Itiquira";"Principal";-17.515100;-54.740000;"25/03/2025";"Crescente";1;"101 - 120 KM/h";"Veículo pesado";57
+"NOVA ROTA DO OESTE";"SAT1";"BR-163";"MT";0.700;"Itiquira";"Principal";-17.515100;-54.740000;"25/03/2025";"Crescente";1;"121 - 140 KM/h";"Veículo pesado";22
+"NOVA ROTA DO OESTE";"SAT1";"BR-163";"MT";0.700;"Itiquira";"Principal";-17.515100;-54.740000;"25/03/2025";"Crescente";1;"141 - 160 KM/h";"Veículo pesado";4

@@ -1,0 +1,4 @@
+concessionaria;praca_de_pedagio;ano_do_pnv_snv;rodovia;uf;km_m;municipal;tipo_de_pista;sentido;situacao;data_da_inativacao;latitude;longitude
+AUTOPISTA FLUMINENSE;Conselheiro Josino;2019;BR-101;RJ;40.5;Campos dos Goytacazes;Principal;Crescente/Decrescente;Ativo;;-21.552594;-41.331597
+AUTOPISTA FLUMINENSE;Serrinha;2019;BR-101;RJ;123.07;Campos dos Goytacazes;Principal;Crescente/Decrescente;Ativo;;-22.04975;-41.685157
+AUTOPISTA FLUMINENSE;Casimiro de Abreu;2019;BR-101;RJ;192.82;Casimiro de Abreu;Principal;Crescente/Decrescente;Ativo;;-22.476441;-42.088519

@@ -1,0 +1,4 @@
+concessionaria;identificador;rodovia;uf;km_m;municipio;tipo_de_pista;latitude;longitude;data_da_passagem;sentido_da_passagem;faixa_da_passagem;velocidade;tipo_de_veiculo;volume_total
+"VIA CRISTAIS";"D0880";"BR-40";"MG";462.950;"Sete Lagoas";"Principal";-19.420795;-44.339028;"08/01/2026";"Crescente";1;"101 - 120 ";"Comercial";3
+"VIA CRISTAIS";"D0880";"BR-40";"MG";462.950;"Sete Lagoas";"Principal";-19.420795;-44.339028;"08/01/2026";"Crescente";1;"121 - 140 ";"Comercial";1
+"VIA CRISTAIS";"D0880";"BR-40";"MG";462.950;"Sete Lagoas";"Principal";-19.420795;-44.339028;"08/01/2026";"Crescente";1;"121 - 140 ";"Veículo Médio";1

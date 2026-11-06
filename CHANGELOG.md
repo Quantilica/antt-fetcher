@@ -7,12 +7,20 @@ e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR
 
 ## [Não lançado]
 
-### Corrigido
-- `check`: com tamanho e `last_modified` do CKAN na entrada, o veredito de frescor sai do manifesto local da mesma URL, sem um HEAD por recurso (o portal leva cerca de 20 s por HEAD em horário de carga, 1453 entradas por rodada). Tamanho igual ao do manifesto é `skip-up-to-date` (`ckan-fresh`); senão é `download` (`ckan-changed` ou `ckan-not-present`). Sem validadores (ex.: o XLSX do gov.br), segue o HEAD do SDK. Nomes e caminhos locais não mudam.
-- Descoberta no CKAN: os `package_show` do grupo rodam em paralelo (4 chamadas), mantendo a ordem e os ids das entradas.
+### Adicionado
+- `lake`: sete conjuntos passam a ser convertidos, um a um, com particao Hive `ano`: `ciot` (agregado mensal origem/destino), `vale-pedagio-obrigatorio` (ano de emissao), `investimentos` (coluna `ano`), `praca-de-pedagio` (cadastro das pracas), `quantidade-possiveis-infratores` (data da passagem), `volume-radar` (data da passagem, aceita `dd/mm/aaaa` e `mm/aaaa`) e `volume-sat` (CSV e JSON).
+- `lake`: o JSON do `volume-sat` (varios documentos `{"volume_sat":[...]}` num arquivo, um registro por linha) e lido por streaming; linha fora desse formato e erro. Com CSV e JSON do mesmo carimbo, o JSON e convertido e o CSV e tratado como gemeo (o JSON ja traz as mesmas passagens), para nao duplicar volumes.
+- `lake`: `inventory()` informa, para cada arquivo bruto, o conjunto que ele alimenta ou o motivo de ficar de fora (`superado`, `nao_tabular`, `gemeo`); arquivo de conjunto ainda sem conversor aparece sem conjunto e sem motivo.
 
 ### Alterado
 - A saída do CLI passa a usar o console Rich em vez de `typer.echo`.
+
+### Corrigido
+- Pacotes com varios recursos (um por concessionaria: `volume-radar`, `volume-sat`, `quantidade-possiveis-infratores`, `ciot`, `volume-trafego-equivalente-praca-pedagio`...) davam o mesmo nome local a recursos diferentes, e cada download sobrescrevia o anterior (so o ultimo sobrevivia). Agora esses arquivos tem nome unico por recurso: `<pacote>_<nome-do-recurso>-<id8>@AAAAMMDD.<ext>`. Pacote com um unico recurso mantem o nome de sempre. Os arquivos antigos de nome coincidente nao sao migrados automaticamente: o conteudo que ja foi sobrescrito precisa ser baixado de novo.
+- `lake`: o conjunto passa a ser reconhecido pelo prefixo do slug no nome local (com ou sem o identificador do recurso).
+- `lake`: `rntrc@AAAAMMDD.csv` falhava com "particao por ano indeterminada" quando o manifesto vizinho nao estava presente (o Drive guarda so o arquivo bruto). Para fotografias/cadastros (`rntrc`, `ciot`, `praca-de-pedagio`), sem periodo no nome original, o ano passa a ser o do carimbo `@AAAAMMDD`, com aviso no log e sem descartar linhas. O periodo do nome original continua tendo preferencia. Limite conhecido: fotografia tirada em janeiro costuma retratar dezembro do ano anterior. Conjunto de eventos sem coluna de data continua dando erro.
+- `check`: com tamanho e `last_modified` do CKAN na entrada, o veredito de frescor sai do manifesto local da mesma URL, sem um HEAD por recurso (o portal leva cerca de 20 s por HEAD em horário de carga, 1453 entradas por rodada). Tamanho igual ao do manifesto é `skip-up-to-date` (`ckan-fresh`); senão é `download` (`ckan-changed` ou `ckan-not-present`). Sem validadores (ex.: o XLSX do gov.br), segue o HEAD do SDK. Nomes e caminhos locais não mudam.
+- Descoberta no CKAN: os `package_show` do grupo rodam em paralelo (4 chamadas), mantendo a ordem e os ids das entradas.
 
 ## [0.2.1] - 2026-11-04
 
