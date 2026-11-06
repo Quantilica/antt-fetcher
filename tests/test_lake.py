@@ -616,3 +616,46 @@ def test_equivalente_praca_pedagio_com_identificador_e_ignorado(
     res = converter.convert(raw_dir.parent, tmp_path / "lake")
     assert not res.errors, res.errors
     assert not (tmp_path / "lake" / "antt" / "volume-trafego-praca-pedagio").exists()
+
+
+def test_rntrc_sem_aspas_com_aspa_solta_nao_engole_linhas(tmp_path: Path) -> None:
+    """rntrc antigo: campos sem aspas e `D"AVILA` no nome (aspa no lugar do
+    apostrofo). Lido com aspas, o campo abria e engolia as linhas seguintes."""
+    raw_dir = _raw(tmp_path, "cargas")
+    raw = raw_dir / "rntrc@20210501.csv"
+    linhas = [
+        "nome_transportador;numero_rntrc;data_primeiro_cadastro;situacao_rntrc",
+        'JOSE CLOVIS D"AVILA ISER;008731039;06/10/2006;ATIVO',
+        "TRANSPORTADORA EXEMPLO;000000002;07/12/2022;ATIVO",
+        'MARCO AURELIO SANT"ANA;012726016;06/08/2010;ATIVO',
+        "OUTRA EXEMPLO;000000004;01/01/2015;ATIVO",
+    ]
+    raw.write_text("\n".join(linhas) + "\n", encoding="utf-8")
+    _write_manifest(raw, "https://x/download/transportadores_rntrc_04_2021.csv")
+    res = converter.convert(raw_dir.parent, tmp_path / "lake")
+    assert not res.errors, res.errors
+    ds = tmp_path / "lake" / "antt" / "rntrc"
+    assert _partitions(ds) == {"ano=2021": 4}
+    df = pl.read_parquet(next((ds / "ano=2021").glob("*.parquet")))
+    assert 'JOSE CLOVIS D"AVILA ISER' in df["nome_transportador"].to_list()
+
+
+def test_volume_radar_sem_cabecalho_usa_o_cabecalho_do_conjunto(
+    tmp_path: Path,
+) -> None:
+    """Arquivo de concessionaria publicado sem a linha de cabecalho."""
+    raw_dir = _raw(tmp_path, "rodovias")
+    raw = raw_dir / "volume-radar_trafego-autopista-dea1a5ed@20260428.csv"
+    raw.write_bytes(
+        b'"AUTOPISTA";"ARAFD6094";"BR-381";"MG";493.290;"Betim";"Principal";'
+        b'-19.96;-44.17;"01/2022";"Crescente";1;"101 - 120 ";"Moto";650\r\n'
+        b'"AUTOPISTA";"ARAFD6102";"BR-381";"MG";886.250;"Estiva";"Principal";'
+        b'-22.51;-46.01;"05/2024";"Decrescente";2;"21 - 50 KM";"Carro";16911\r\n'
+    )
+    res = converter.convert(raw_dir.parent, tmp_path / "lake")
+    assert not res.errors, res.errors
+    ds = tmp_path / "lake" / "antt" / "volume-radar"
+    assert _partitions(ds) == {"ano=2022": 1, "ano=2024": 1}
+    df = pl.read_parquet(next((ds / "ano=2022").glob("*.parquet")))
+    assert df["concessionaria"].to_list() == ["AUTOPISTA"]
+    assert df["volume_total"].to_list() == ["650"]

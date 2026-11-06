@@ -193,6 +193,41 @@ def _detect_separator(csv_path: Path) -> str:
     return ";" if ";" in header else ","
 
 
+# Conjuntos com arquivos publicados sem a linha de cabecalho (alguns
+# ``volume-radar`` de concessionarias): o cabecalho dos demais arquivos do
+# conjunto e aplicado quando a primeira linha e dado, nao nome de coluna.
+HEADERLESS_COLUMNS: dict[str, tuple[str, ...]] = {
+    "volume-radar": (
+        "concessionaria",
+        "identificador",
+        "rodovia",
+        "uf",
+        "km_m",
+        "municipio",
+        "tipo_de_pista",
+        "latitude",
+        "longitude",
+        "data_da_passagem",
+        "sentido_da_passagem",
+        "faixa_da_passagem",
+        "velocidade",
+        "tipo_de_veiculo",
+        "volume_total",
+    ),
+}
+
+
+def _has_quoted_fields(lines: list[str], sep: str) -> bool:
+    """Algum campo das primeiras linhas comeca com aspas (CSV com quoting)."""
+    return any(line.startswith('"') or f'{sep}"' in line for line in lines)
+
+
+def _is_headerless(first_line: str, sep: str, header: tuple[str, ...]) -> bool:
+    """A primeira linha tem o numero de campos do cabecalho mas nao os nomes."""
+    fields = [f.strip().strip('"') for f in first_line.split(sep)]
+    return len(fields) == len(header) and _norm_col(fields[0]) != header[0]
+
+
 # Colunas com data/ano do registro, em ordem de preferencia, por conjunto. A
 # particao ``ano`` vem da linha, nao do arquivo. Conjunto ausente de
 # ``YEAR_COLUMNS`` usa a lista generica e, se nada casar, a primeira coluna com
@@ -525,12 +560,30 @@ class AnttLakeConverter:
                 pl.all().cast(pl.String)
             )
         else:
-            lf = pl.scan_csv(
-                csv_path,
-                separator=_detect_separator(csv_path),
-                infer_schema=False,
-                encoding="utf8",
-            )
+            sep = _detect_separator(csv_path)
+            with csv_path.open(encoding="utf8", errors="replace") as fh:
+                sample = [fh.readline().rstrip("\r\n") for _ in range(200)]
+            first = sample[0]
+            header = HEADERLESS_COLUMNS.get(ds_id)
+            if header and _is_headerless(first, sep, header):
+                lf = pl.scan_csv(
+                    csv_path,
+                    separator=sep,
+                    has_header=False,
+                    new_columns=list(header),
+                    infer_schema=False,
+                    encoding="utf8",
+                )
+            else:
+                # Arquivo sem campo entre aspas: uma aspa solta no dado (`D"AVILA`
+                # no rntrc antigo) abriria um campo e engoliria as linhas seguintes.
+                lf = pl.scan_csv(
+                    csv_path,
+                    separator=sep,
+                    infer_schema=False,
+                    encoding="utf8",
+                    quote_char='"' if _has_quoted_fields(sample, sep) else None,
+                )
         columns = lf.collect_schema().names()
         names = [_norm_col(c) for c in columns]
         lf = lf.rename({c: _norm_col(c) for c in columns})
