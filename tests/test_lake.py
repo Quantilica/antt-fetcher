@@ -534,6 +534,18 @@ def test_volume_sat_csv_e_gemeo_do_json_de_mesmo_carimbo(tmp_path: Path) -> None
     assert plan["volume-sat@20261103.csv"].skip_reason == "gemeo"
 
 
+def test_volume_sat_ignora_o_manifesto_ao_lado(tmp_path: Path) -> None:
+    raw_dir = _raw(tmp_path, "rodovias")
+    shutil.copy(_FIXTURES / "volume-sat.csv", raw_dir / "volume-sat@20261103.csv")
+    (raw_dir / "volume-sat@20261103.csv.manifest.json").write_text(
+        '{"url": "https://x.invalid/volume-sat.csv", "sha256": "0"}',
+        encoding="utf-8",
+    )
+    res = converter.convert(raw_dir.parent, tmp_path / "lake")
+    assert not res.errors, res.errors
+    assert _partitions(tmp_path / "lake" / "antt" / "volume-sat") == {"ano=2025": 3}
+
+
 def test_volume_sat_csv_sozinho_converte_por_data_de_passagem(
     tmp_path: Path,
 ) -> None:
@@ -638,6 +650,30 @@ def test_rntrc_sem_aspas_com_aspa_solta_nao_engole_linhas(tmp_path: Path) -> Non
     assert _partitions(ds) == {"ano=2021": 4}
     df = pl.read_parquet(next((ds / "ano=2021").glob("*.parquet")))
     assert 'JOSE CLOVIS D"AVILA ISER' in df["nome_transportador"].to_list()
+
+
+def test_csv_com_aspas_e_aspa_interna_sem_escape_e_reparado(tmp_path: Path) -> None:
+    """acidentes-rodovias (autopista, out/2026): campos entre aspas e uma linha
+    com `"barreira ou "submarino";`, que o leitor rejeitava (CSV malformed)."""
+    raw_dir = _raw(tmp_path, "rodovias")
+    raw = raw_dir / "acidentes-rodovias@20261028.csv"
+    linhas = [
+        "data;horario;tipo_de_acidente;mortos",
+        '"01/01/2023";"00:05:00";"Saida de Pista";0',
+        '"02/09/2023";"18:40:00";"Choque - Defensa, barreira ou "submarino";0',
+        '"03/09/2023";"10:00:00";"Ja ""escapada"" certa";1',
+        '"04/09/2023";"11:00:00";"campo com\nquebra de linha";0',
+    ]
+    raw.write_text("\r\n".join(linhas) + "\r\n", encoding="utf-8")
+    res = converter.convert(raw_dir.parent, tmp_path / "lake")
+    assert not res.errors, res.errors
+    ds = tmp_path / "lake" / "antt" / "acidentes-rodovias"
+    df = pl.read_parquet(next((ds / "ano=2023").glob("*.parquet")))
+    tipos = df["tipo_de_acidente"].to_list()
+    assert len(tipos) == 4
+    assert 'Choque - Defensa, barreira ou "submarino' in tipos
+    assert 'Ja "escapada" certa' in tipos
+    assert "campo com\nquebra de linha" in tipos
 
 
 def test_volume_radar_sem_cabecalho_usa_o_cabecalho_do_conjunto(

@@ -7,6 +7,10 @@ e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR
 
 ## [Não lançado]
 
+### Corrigido
+- `lake`: os manifestos (`.manifest.json`) ao lado do bruto entravam na conversão; no `volume-sat`, que aceita JSON, cada manifesto virava um erro. A conversão ignora manifestos e `.tmp`, como o `inventory` já fazia.
+- `lake`: CSV com campos entre aspas e uma aspa interna sem escape (`"barreira ou "submarino";` no `acidentes-rodovias` da Autopista, out/2026) falhava com `CSV malformed`. Linhas com número ímpar de aspas têm a aspa que não abre nem fecha campo escapada (`""`) antes da leitura, com aviso no log; as demais linhas não mudam.
+
 ## [0.3.1] - 2026-11-06
 
 ### Corrigido

@@ -222,6 +222,46 @@ def _has_quoted_fields(lines: list[str], sep: str) -> bool:
     return any(line.startswith('"') or f'{sep}"' in line for line in lines)
 
 
+def _escape_stray_quotes(line: str, sep: str) -> str:
+    """Escapa (``""``) a aspa que nao abre nem fecha campo numa linha com aspas
+    impares: ``"barreira ou "submarino";0`` -> ``"barreira ou ""submarino";0``.
+    """
+    out = []
+    last = len(line) - 1
+    for i, ch in enumerate(line):
+        boundary = i == 0 or i == last or line[i - 1] == sep or line[i + 1] == sep
+        out.append('""' if ch == '"' and not boundary else ch)
+    return "".join(out)
+
+
+def _repair_stray_quotes(csv_path: Path, sep: str) -> int:
+    """Reescreve o CSV (temporario, UTF-8) escapando aspas soltas no dado.
+
+    So linhas com numero impar de aspas mudam: campo com quebra de linha tem as
+    aspas nas bordas e aspa ja escapada (``""``) nao torna a linha impar.
+    Devolve quantas linhas mudaram.
+    """
+    fixed = 0
+    tmp = csv_path.with_name(csv_path.name + ".reparo")
+    with (
+        csv_path.open(encoding="utf8", newline="") as src,
+        tmp.open("w", encoding="utf8", newline="") as dst,
+    ):
+        for line in src:
+            body = line.rstrip("\r\n")
+            if body.count('"') % 2:
+                new = _escape_stray_quotes(body, sep)
+                if new != body:
+                    fixed += 1
+                    line = new + line[len(body) :]
+            dst.write(line)
+    if fixed:
+        os.replace(tmp, csv_path)
+    else:
+        tmp.unlink()
+    return fixed
+
+
 def _is_headerless(first_line: str, sep: str, header: tuple[str, ...]) -> bool:
     """A primeira linha tem o numero de campos do cabecalho mas nao os nomes."""
     fields = [f.strip().strip('"') for f in first_line.split(sep)]
@@ -498,7 +538,13 @@ class AnttLakeConverter:
                 lake_path / self.source_id / ds, descriptor, force=force
             )
 
-        all_raw_files = [f for f in input_path.rglob("*") if f.is_file()]
+        all_raw_files = [
+            f
+            for f in input_path.rglob("*")
+            if f.is_file()
+            and not f.name.endswith(".manifest.json")
+            and not f.name.endswith(".tmp")
+        ]
         active_files = [Path(f) for f in select_current(all_raw_files)]
 
         for raw_file in active_files:
@@ -577,12 +623,20 @@ class AnttLakeConverter:
             else:
                 # Arquivo sem campo entre aspas: uma aspa solta no dado (`D"AVILA`
                 # no rntrc antigo) abriria um campo e engoliria as linhas seguintes.
+                # Com aspas, a aspa interna sem escape e escapada antes da leitura.
+                quoted = _has_quoted_fields(sample, sep)
+                if quoted and (n := _repair_stray_quotes(csv_path, sep)):
+                    logger.warning(
+                        "ANTT %s: %d linha(s) com aspa sem escape reparada(s)",
+                        label,
+                        n,
+                    )
                 lf = pl.scan_csv(
                     csv_path,
                     separator=sep,
                     infer_schema=False,
                     encoding="utf8",
-                    quote_char='"' if _has_quoted_fields(sample, sep) else None,
+                    quote_char='"' if quoted else None,
                 )
         columns = lf.collect_schema().names()
         names = [_norm_col(c) for c in columns]
