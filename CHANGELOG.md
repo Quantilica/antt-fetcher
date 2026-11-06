@@ -7,6 +7,8 @@ e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR
 
 ## [Não lançado]
 
+## [0.3.1] - 2026-11-06
+
 ### Corrigido
 - `lake`: CSV sem campos entre aspas com uma aspa solta no dado (`D"AVILA`, `SANT"ANA` nos arquivos antigos do `rntrc`) falhava com `CSV malformed`, porque a aspa abria um campo e engolia as linhas seguintes. Sem campo que comece com aspas nas primeiras linhas, o arquivo é lido sem quoting.
 - `lake`: arquivos do `volume-radar` publicados sem a linha de cabeçalho (algumas concessionárias) falhavam com "partição por ano indeterminada"; agora recebem o cabeçalho dos demais arquivos do conjunto.

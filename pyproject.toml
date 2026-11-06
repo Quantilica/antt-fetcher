@@ -1,6 +1,6 @@
 [project]
 name = "antt-fetcher"
-version = "0.3.0"
+version = "0.3.1"
 description = "Coletor e conversor Lake Hive de dados abertos da ANTT"
 readme = "README.md"
 authors = [
