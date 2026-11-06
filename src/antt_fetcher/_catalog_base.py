@@ -24,6 +24,10 @@ class DatasetEntry:
     quarter: int | None = None
     month: int | None = None
     slug: str | None = None
+    # Validadores do recurso no CKAN (tamanho em bytes e last_modified ISO, UTC):
+    # permitem o ``check`` sem um HEAD por entrada. Não entram no caminho local.
+    remote_size: int | None = None
+    remote_modified: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Convert entry to dict."""

@@ -7,6 +7,10 @@ e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR
 
 ## [Não lançado]
 
+### Corrigido
+- `check`: com tamanho e `last_modified` do CKAN na entrada, o veredito de frescor sai do manifesto local da mesma URL, sem um HEAD por recurso (o portal leva cerca de 20 s por HEAD em horário de carga, 1453 entradas por rodada). Tamanho igual ao do manifesto é `skip-up-to-date` (`ckan-fresh`); senão é `download` (`ckan-changed` ou `ckan-not-present`). Sem validadores (ex.: o XLSX do gov.br), segue o HEAD do SDK. Nomes e caminhos locais não mudam.
+- Descoberta no CKAN: os `package_show` do grupo rodam em paralelo (4 chamadas), mantendo a ordem e os ids das entradas.
+
 ### Alterado
 - A saída do CLI passa a usar o console Rich em vez de `typer.echo`.
 

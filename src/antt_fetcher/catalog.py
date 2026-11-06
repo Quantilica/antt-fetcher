@@ -17,6 +17,7 @@ from __future__ import annotations
 import logging
 import re
 import unicodedata
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from . import (
@@ -69,6 +70,8 @@ CATALOG: dict[str, AnttDataset] = {
     ds.slug: ds for mod in _MODULES for ds in mod.DATASETS
 }
 
+# Chamadas simultâneas ao CKAN na descoberta (o portal fica atrás de um WAF).
+CKAN_WORKERS = 4
 _FORMATOS = {"CSV", "JSON", "ZIP", "PARQUET"}
 _CACHE: dict[str, list[dict[str, Any]]] = {}
 _GOVBR_XLSX_RE = re.compile(r'href="([^"]+origem-destino[^"]*\.xlsx)"', re.IGNORECASE)
@@ -92,6 +95,38 @@ def resolve_govbr_url(html: str) -> str | None:
     """Extrai a URL do XLSX origem-destino da página do gov.br (ou ``None``)."""
     match = _GOVBR_XLSX_RE.search(html)
     return match.group(1) if match else None
+
+
+def _resource_size(resource: dict[str, Any]) -> int | None:
+    """Tamanho do recurso no CKAN, ou ``None`` se ausente, zero ou inválido."""
+    try:
+        size = int(resource.get("size"))  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    return size if size > 0 else None
+
+
+def _show_packages(
+    client: AnttClient, slugs: list[str]
+) -> dict[str, dict[str, Any] | None]:
+    """``package_show`` de vários pacotes em paralelo (o CKAN leva ~6 s por chamada).
+
+    O resultado é indexado por slug; a ordem de uso fica a cargo de quem chama,
+    então os ids e a ordem das entradas não dependem do paralelismo. Pacote
+    indisponível vira ``None`` (não derruba o grupo).
+    """
+
+    def one(slug: str) -> dict[str, Any] | None:
+        try:
+            return client.package_show(slug)
+        except Exception as exc:  # noqa: BLE001 - pacote removido não derruba o grupo
+            logger.warning("Pacote %s indisponível no CKAN: %s", slug, exc)
+            return None
+
+    if len(slugs) <= 1:
+        return {slug: one(slug) for slug in slugs}
+    with ThreadPoolExecutor(max_workers=CKAN_WORKERS) as pool:
+        return dict(zip(slugs, pool.map(one, slugs), strict=True))
 
 
 def _govbr_entries() -> list[dict[str, Any]]:
@@ -132,11 +167,11 @@ def _entries_for_group(group: str) -> list[dict[str, Any]]:
     client = AnttClient()
     entries: list[dict[str, Any]] = []
     seen: set[str] = set()
-    for package_slug in DATASETS_BY_GROUP.get(group, []):
-        try:
-            package = client.package_show(package_slug)
-        except Exception as exc:  # noqa: BLE001 - pacote removido não derruba o grupo
-            logger.warning("Pacote %s indisponível no CKAN: %s", package_slug, exc)
+    slugs = DATASETS_BY_GROUP.get(group, [])
+    packages = _show_packages(client, slugs)
+    for package_slug in slugs:
+        package = packages.get(package_slug)
+        if package is None:
             continue
         for resource in client.pick_package_resources(package):
             fmt = str(resource.get("format") or "").strip().upper()
@@ -162,6 +197,8 @@ def _entries_for_group(group: str) -> list[dict[str, Any]]:
                     ext=_ext(url, fmt),
                     group=group,
                     slug=package_slug,
+                    remote_size=_resource_size(resource),
+                    remote_modified=str(resource.get("last_modified") or "") or None,
                 ).to_dict()
             )
     _CACHE[group] = entries

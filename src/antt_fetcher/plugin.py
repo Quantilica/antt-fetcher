@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import threading
 from pathlib import Path
 from typing import Any
 
 import typer
-from quantilica.cli.sdk import FetcherApp, make_resolve_groups
+from quantilica.cli.sdk import CheckPlanItem, FetcherApp, make_resolve_groups
 from quantilica.cli.ui import get_console
 from quantilica.core.sync import FreshnessPolicy
 
@@ -45,6 +46,91 @@ fetcher = FetcherApp(
     default_output=Path("/data/antt"),
     freshness_policy=FreshnessPolicy.HEAD_FALLBACK_GET,
 )
+
+
+def _ckan_validators(entry: dict[str, Any]) -> tuple[int, dt.datetime] | None:
+    """Tamanho e ``last_modified`` do recurso no CKAN (UTC), ou ``None``."""
+    try:
+        size = int(entry.get("remote_size"))  # type: ignore[arg-type]
+        moment = dt.datetime.fromisoformat(str(entry.get("remote_modified")))
+    except (TypeError, ValueError):
+        return None
+    if size <= 0:
+        return None
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=dt.UTC)
+    return size, moment.astimezone(dt.UTC)
+
+
+_index_lock = threading.Lock()
+_index_cache: dict[tuple[str, str], dict[str, tuple[int, Path]]] = {}
+
+
+def _local_index(output_dir: Path, group: str) -> dict[str, tuple[int, Path]]:
+    """``url -> (tamanho, caminho do bruto)`` lido dos manifestos do grupo.
+
+    Um manifesto por arquivo baixado; o bruto pode já ter sido removido pelo
+    ingest, mas o manifesto fica (o SDK trata como "manifest-fresh"). Montado
+    uma vez por (pasta, grupo) e processo: o ``check`` roda em um processo só.
+    """
+    key = (str(output_dir), group)
+    with _index_lock:
+        index = _index_cache.get(key)
+        if index is None:
+            index = {}
+            for sidecar in sorted((output_dir / group).glob("*.manifest.json")):
+                try:
+                    data = json.loads(sidecar.read_text(encoding="utf-8"))
+                    url, size = str(data["url"]), int(data["size_bytes"])
+                except (OSError, ValueError, KeyError, TypeError):
+                    continue
+                index[url] = (
+                    size,
+                    sidecar.with_name(sidecar.name[: -len(".manifest.json")]),
+                )
+            _index_cache[key] = index
+        return index
+
+
+def _antt_check_entry(entry: dict[str, Any], output_dir: Path) -> CheckPlanItem:
+    """Veredito de frescor sem HEAD quando o CKAN traz tamanho e data.
+
+    O HEAD do portal leva ~20 s por recurso em horário de carga (1453 entradas
+    por rodada). Com ``remote_size`` e ``remote_modified`` na entrada, vale o
+    manifesto local da mesma URL: tamanho igual é ``skip-up-to-date``; senão é
+    ``download``, e o caminho usa a data do CKAN (o download recalcula o
+    carimbo pelo ``Last-Modified``). Sem validadores, cai no check do SDK (HEAD).
+    """
+    validators = _ckan_validators(entry)
+    if validators is None:
+        return FetcherApp.check_entry(fetcher, entry, output_dir)
+    size, moment = validators
+    group = str(entry.get("group") or "default")
+    known = _local_index(output_dir, group).get(str(entry["url"]))
+    if known is not None and known[0] == size:
+        local, action, reason, exists = known[1], "skip-up-to-date", "ckan-fresh", True
+    else:
+        local = path_builder(output_dir, entry, moment.date())
+        exists = known is not None
+        action = "download"
+        reason = "ckan-changed" if exists else "ckan-not-present"
+    return CheckPlanItem(
+        dataset=str(entry.get("group") or entry.get("id") or "datasets"),
+        id=str(entry.get("id", "unknown")),
+        url=str(entry["url"]),
+        partition=None,
+        local_path=str(local),
+        remote_etag=None,
+        remote_last_modified=None,
+        remote_size=size,
+        local_exists=exists,
+        action=action,
+        reason=reason,
+        entry=dict(entry),
+    )
+
+
+fetcher.check_entry = _antt_check_entry  # type: ignore[method-assign]
 
 
 def convert(
