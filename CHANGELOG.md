@@ -7,6 +7,8 @@ e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR
 
 ## [Não lançado]
 
+## [0.3.0] - 2026-11-06
+
 ### Adicionado
 - `lake`: sete conjuntos passam a ser convertidos, um a um, com particao Hive `ano`: `ciot` (agregado mensal origem/destino), `vale-pedagio-obrigatorio` (ano de emissao), `investimentos` (coluna `ano`), `praca-de-pedagio` (cadastro das pracas), `quantidade-possiveis-infratores` (data da passagem), `volume-radar` (data da passagem, aceita `dd/mm/aaaa` e `mm/aaaa`) e `volume-sat` (CSV e JSON).
 - `lake`: o JSON do `volume-sat` (varios documentos `{"volume_sat":[...]}` num arquivo, um registro por linha) e lido por streaming; linha fora desse formato e erro. Com CSV e JSON do mesmo carimbo, o JSON e convertido e o CSV e tratado como gemeo (o JSON ja traz as mesmas passagens), para nao duplicar volumes.
