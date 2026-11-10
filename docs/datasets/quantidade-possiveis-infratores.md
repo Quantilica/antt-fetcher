@@ -54,7 +54,7 @@ Quantidade de possíveis infratores por excesso de velocidade nos radares de con
 ## Origem e coleta
 
 - O fetcher baixa os CSV do pacote `quantidade-possiveis-infratores` (`https://dados.antt.gov.br/dataset/quantidade-possiveis-infratores`): um recurso por concessionária (21 CSV e 21 JSON).
-- No bruto: `quantidade-possiveis-infratores_<recurso>-<id>@AAAAMMDD.csv`; arquivos antigos têm o nome nu. Conferido em 2026-11-10 pela listagem do bruto: 18 arquivos (254 MB), todos de recursos diferentes e vigentes; 5 manifestos sem arquivo no bruto conferido.
+- No bruto: `quantidade-possiveis-infratores_<recurso>-<id>@AAAAMMDD.csv`; arquivos antigos têm o nome nu.
 
 ## Conteúdo
 
@@ -95,8 +95,7 @@ Descrições do dicionário de dados da ANTT ("Dicionário de Dados - Quantidade
 ## Cuidados de uso
 
 - **Recursos de nome nu se somam aos demais.** O bruto tem arquivos de nome nu (`quantidade-possiveis-infratores@AAAAMMDD.csv`), gravados por versões antigas do fetcher que davam o mesmo nome a recursos diferentes do pacote (Eco050, Rodovia do Aço, Autopista Fluminense, MS Via, Eco101 e Ecoponte, entre outros). A versão vigente é escolhida por recurso (URL do manifesto ao lado), então todos entram, cada um no seu Parquet (`quantidade-possiveis-infratores_<id8>.parquet`). Um arquivo de nome nu sem manifesto ao lado segue a regra do nome (só o mais recente de cada nome).
-- **Cópia sob dois nomes.** `quantidade-possiveis-infratores@20260828.csv` (Autopista Fluminense) e o recurso `...aut-ae4f9bef@20260828` têm a mesma URL e o mesmo hash. O conversor trata como um só: entra o de nome com chave, e o de nome nu aparece como `gemeo` no `inventory()`. O mesmo vale, sem manifesto, para um arquivo de nome nu de mesmo carimbo, tamanho e `sha256` de um de nome com chave. No bruto conferido o arquivo de nome com chave dessa cópia tem só o manifesto, e então o de nome nu é o que entra.
-- **Manifestos sem arquivo.** Cinco manifestos do pacote não têm o CSV no bruto conferido.
+- **Cópia sob dois nomes.** `quantidade-possiveis-infratores@20260828.csv` (Autopista Fluminense) e o recurso `...aut-ae4f9bef@20260828` têm a mesma URL e o mesmo hash. O conversor trata como um só: entra o de nome com chave, e o de nome nu aparece como `gemeo` no `inventory()`. O mesmo vale, sem manifesto, para um arquivo de nome nu de mesmo carimbo, tamanho e `sha256` de um de nome com chave.
 - **Velocidade é faixa.** `velocidade` traz faixas como `81 - 100 KM/h`, não a velocidade medida.
 
 ## Exemplos

@@ -55,7 +55,7 @@ Registros de acidentes ocorridos nos trechos concedidos às operadoras ferroviá
 ## Origem e coleta
 
 - O fetcher baixa os recursos CSV do pacote `relatorio-de-acompanhamento-de-acidentes-ferroviarios-raaf` (`https://dados.antt.gov.br/dataset/relatorio-de-acompanhamento-de-acidentes-ferroviarios-raaf`): "Índice de Acidentes Ferroviários de 2006 a 2019" e "Acidentes Ferroviários - Dezembro de 2020 em diante" (5 CSV e 5 JSON no catálogo).
-- No bruto: `relatorio-de-acompanhamento-de-acidentes-ferroviarios-raaf@AAAAMMDD.csv` (nome nu) e `..._<recurso>-<id>@AAAAMMDD.csv`. Conferido em 2026-11-10 pela listagem do bruto: 7 arquivos.
+- No bruto: `relatorio-de-acompanhamento-de-acidentes-ferroviarios-raaf@AAAAMMDD.csv` (nome nu) e `..._<recurso>-<id>@AAAAMMDD.csv`.
 - No bruto, o nome nu foi usado por recursos diferentes: `@20231130` (acidentes de 2004 a nov/2020, 22 colunas, 10.824 linhas), `@20250710` e `@20260410` (acidentes de dez/2020 em diante, 27 colunas, 3.305 e 3.710 linhas).
 
 ## Conteúdo
@@ -63,7 +63,7 @@ Registros de acidentes ocorridos nos trechos concedidos às operadoras ferroviá
 - Unidade de análise: um acidente (tabela de acidentes) ou um par concessionária e ano (índice, 182 linhas na versão de julho de 2025). O arquivo de índice de 2026 (`...8f8f2a80@20260410`) tem só o cabeçalho, sem linhas.
 - Cobertura: acidentes de 2004 a nov/2020 no arquivo de 2023 e de dez/2020 em diante nos de 2025 e 2026; índice de 2006 a 2019.
 - Eras: 22 colunas até nov/2020 e 27 a partir de dez/2020 (o dicionário também tem duas versões).
-- O que chega ao lake (conversão local dos 7 arquivos do bruto, 2026-11-10): 10.824 linhas de acidentes de 2004 a nov/2020 (`@20231130`), 3.305 e 3.710 linhas de acidentes de dez/2020 em diante (os recursos de julho de 2025 e de abril de 2026), 182 linhas do índice de 2006 a 2019 e nenhuma do índice de 2026 (só o cabeçalho). Os nomes nus `@20250710` e `@20260410` são cópias dos recursos com chave de mesmo carimbo e não entram uma segunda vez.
+- O que chega ao lake (conversão local dos 7 arquivos do bruto, 2026-11-10): 10.824 linhas de acidentes de 2004 a nov/2020, 3.305 e 3.710 linhas de acidentes de dez/2020 em diante (os recursos de julho de 2025 e de abril de 2026), 182 linhas do índice de 2006 a 2019 e nenhuma do índice de 2026 (só o cabeçalho). Um nome nu que repete, no mesmo carimbo, o conteúdo de um recurso com chave não entra uma segunda vez.
 
 ## Variáveis
 
@@ -112,7 +112,6 @@ Colunas dos CSV do bruto (normalizadas como o conversor faria) e descrições do
 
 - **Três tabelas num dataset.** Acidentes até nov/2020 (22 colunas), acidentes de dez/2020 em diante (27) e índice (3, com `ano` como partição) têm esquemas distintos; leia pelo nome do arquivo de origem ou filtre pelas colunas que só uma tabela tem (`indice_de_acidentes_por_milhao_de_trem_km` só no índice; `n_trem` só nos acidentes de dez/2020 em diante).
 - **Versões do mesmo período repetem linhas.** O portal lista juntos "Acidentes Ferroviários - Dezembro de 2020 a Junho de 2025" e "... a Janeiro de 2026", dois recursos distintos em que o segundo contém o primeiro (as partições de 2021 a 2024 têm o mesmo número de linhas nos dois, e 2025 tem 326 contra 687). Os dois são vigentes e entram, cada um no seu Parquet: contar a partição inteira conta os acidentes de dez/2020 a jun/2025 duas vezes; use só o recurso mais novo. O mesmo vale para o índice (recursos de 2025 e de 2026).
-- **Nome nu sem manifesto.** O arquivo de acidentes de 2004 a nov/2020 (`@20231130`) está no bruto conferido sem manifesto; ele só entra porque os outros dois nomes nus sem manifesto são cópias de recursos com chave. Se a cópia deixasse de existir, a regra do nome (só o mais recente de cada nome nu) o descartaria.
 - **Índice vazio em 2026.** O recurso do índice na versão de abril de 2026 tem só o cabeçalho.
 - **Dicionário imperfeito.** O dicionário descreve `Municipio` como "a região geográfica", `Interrupção` como numérica e `Equipagem` como nome do maquinista; nas linhas conferidas `Interrupção` é um número decimal (por exemplo `20.0`) e `Equipagem` vem vazio.
 - **Pessoais.** O campo `equipagem` seria nome de maquinista segundo o dicionário; vem vazio nas linhas conferidas.

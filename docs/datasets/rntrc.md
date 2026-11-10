@@ -62,7 +62,7 @@ Fotografia mensal do Registro Nacional de Transportadores Rodoviários de Cargas
 
 - O fetcher baixa os CSV mensais do pacote `rntrc` (`https://dados.antt.gov.br/dataset/rntrc`), que tem um recurso `transportadores_rntrc_MM_AAAA.csv` por mês desde agosto de 2020 (73 CSV).
 - No bruto o nome é `rntrc@AAAAMMDD.csv` (data da última modificação na fonte), com manifesto ao lado que guarda a URL de origem.
-- Conferido em 2026-11-10 pela listagem do bruto: 71 arquivos, todos com o mesmo nome nu (`rntrc@AAAAMMDD.csv`) e todos de recursos diferentes: 71 URLs distintas de `transportadores_rntrc_MM_AAAA.csv`, de 08/2020 a 09/2026, sem os meses 11/2022, 07/2024 e 02/2025 (6,7 GB). Cada um é um mês, não uma versão do outro, e os 71 são vigentes (o mais recente é `rntrc@20261010.csv`, o recurso de 09/2026, 163 MB).
+- O pacote tem 71 recursos mensais, de 08/2020 a 09/2026, sem os meses 11/2022, 07/2024 e 02/2025. Cada recurso é um mês, não uma versão do outro: todos são vigentes e cada um vira o seu Parquet. No bruto os arquivos antigos têm todos o mesmo nome nu (`rntrc@AAAAMMDD.csv`), e é o manifesto, com a URL de cada mês, que os distingue.
 
 ## Conteúdo
 

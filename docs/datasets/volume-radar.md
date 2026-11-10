@@ -54,7 +54,7 @@ Tráfego de veículos nos radares de controle de velocidade das concessionárias
 ## Origem e coleta
 
 - O fetcher baixa os CSV do pacote `volume-radar` (`https://dados.antt.gov.br/dataset/volume-radar`): um recurso por concessionária e por granularidade (44 CSV e 44 JSON, estes não convertidos).
-- No bruto: `volume-radar_<recurso>-<id>@AAAAMMDD.csv`; arquivos antigos têm o nome nu. Conferido em 2026-11-10 pela listagem do bruto: 39 arquivos (818 MB), 37 vigentes (813 MB), um por recurso; os 2 que ficam de fora são arquivos de nome nu sem manifesto, superados pela regra do nome (`volume-radar@20260228.csv` e `volume-radar@20260728.csv`); 8 manifestos sem arquivo no bruto conferido.
+- No bruto: `volume-radar_<recurso>-<id>@AAAAMMDD.csv`; arquivos antigos têm o nome nu.
 - Parte dos arquivos foi publicada **sem a linha de cabeçalho** (todos os 5 mensais abertos); o conversor aplica o cabeçalho do dicionário quando a primeira linha tem 15 campos e não é um nome de coluna.
 
 ## Conteúdo
@@ -100,7 +100,6 @@ Descrições do dicionário de dados da ANTT ("Dicionário de Dados - Tráfego d
 
 - **Dupla contagem entre arquivos diário e mensal.** O pacote traz, por concessionária, um arquivo diário (`volume-radar-<c>.csv`) e um mensal consolidado (`volume-radar-<c>_mensal_consolidado.csv`) para quase todas; os dois estão vigentes no bruto e caem na mesma partição `ano`. Conferido (2026-11-10) na CRT e na Via040: o total mensal de `volume_total` é idêntico nos dois arquivos (7.297.396 e 558.649 veículos). **Filtre `granularidade = "dia"` (ou `"mes"`) antes de somar**, senão o tráfego é contado duas vezes.
 - **Recursos de nome nu se somam aos demais.** O bruto tem arquivos de nome nu (`volume-radar@AAAAMMDD.csv`), gravados por versões antigas do fetcher que davam o mesmo nome a recursos diferentes do pacote (MS Via, Autopista Fluminense mensal, Ecoponte, Eco101 e outros). A versão vigente é escolhida por recurso (URL do manifesto ao lado), então todos entram, cada um no seu Parquet (`volume-radar_<id8>.parquet`). Um arquivo de nome nu sem manifesto ao lado segue a regra do nome (só o mais recente de cada nome).
-- **Manifestos sem arquivo.** Oito manifestos do pacote não têm o CSV no bruto conferido.
 - **Velocidade é faixa e data pode ser só mês** (`mm/aaaa`) nos arquivos mensais consolidados; `granularidade` registra se o arquivo é diário ou mensal.
 - **Volume por linha é agregado** (até 892.624 veículos por linha nos mensais).
 

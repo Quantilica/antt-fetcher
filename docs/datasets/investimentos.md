@@ -54,7 +54,7 @@ Total anual de investimentos que cada concessionária de rodovia federal informa
 ## Origem e coleta
 
 - O fetcher baixa o CSV `investimentos.csv` do pacote `investimentos` (`https://dados.antt.gov.br/dataset/investimentos`).
-- No bruto: `investimentos@AAAAMMDD.csv`, com manifesto. Conferido em 2026-11-10: 1 arquivo, `@20260522` (10 KB).
+- No bruto: `investimentos@AAAAMMDD.csv`, com manifesto.
 
 ## Conteúdo
 

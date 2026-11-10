@@ -54,7 +54,7 @@ Dados mensais das emissões de Vale-Pedágio Obrigatório (VPO), por categoria d
 ## Origem e coleta
 
 - O fetcher baixa um CSV único (`vpo-vale-pedagio-obrigatorio.csv`) do endereço registrado no pacote `vale-pedagio-obrigatorio` (`https://dados.antt.gov.br/dataset/vale-pedagio-obrigatorio`). O pacote exibe 0 recursos na API do portal em 2026-11-10; o arquivo existe no endereço de download.
-- No bruto: `vale-pedagio-obrigatorio@AAAAMMDD.csv` (data da última modificação), com manifesto. Conferido em 2026-11-10 pela listagem do bruto: 1 arquivo (`@20261006`, 3,8 KB).
+- No bruto: `vale-pedagio-obrigatorio@AAAAMMDD.csv` (data da última modificação), com manifesto.
 
 ## Conteúdo
 

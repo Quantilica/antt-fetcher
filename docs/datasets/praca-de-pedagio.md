@@ -54,7 +54,7 @@ Cadastro das praças de pedágio das rodovias federais concedidas, registrado no
 ## Origem e coleta
 
 - O fetcher baixa o CSV `dados-dos-praas-de-pedgio.csv` do pacote `praca-de-pedagio` (`https://dados.antt.gov.br/dataset/praca-de-pedagio`); o pacote traz também um KMZ, não baixado.
-- No bruto: `praca-de-pedagio@AAAAMMDD.csv`, com manifesto. Conferido em 2026-11-10: 1 arquivo, `@20261103` (35 KB).
+- No bruto: `praca-de-pedagio@AAAAMMDD.csv`, com manifesto.
 
 ## Conteúdo
 

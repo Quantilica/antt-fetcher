@@ -24,7 +24,7 @@ dataset:
 
 ## Resumo
 
-Tráfego de veículos nos equipamentos de contagem veicular (SAT) das concessionárias, registrado no Sistema de Informação de Rodovias (SIR) da ANTT. É o maior dos conjuntos de tráfego do fetcher (cerca de 1,7 GB vigentes).
+Tráfego de veículos nos equipamentos de contagem veicular (SAT) das concessionárias, registrado no Sistema de Informação de Rodovias (SIR) da ANTT. É o maior dos conjuntos de tráfego do fetcher (alguns GB de CSV).
 
 ## Ficha técnica
 
@@ -54,7 +54,7 @@ Tráfego de veículos nos equipamentos de contagem veicular (SAT) das concession
 ## Origem e coleta
 
 - O fetcher baixa os CSV e o JSON do pacote `volume-sat` (`https://dados.antt.gov.br/dataset/volume-sat`): por concessionária, um CSV diário e um mensal consolidado (59 CSV e 47 JSON no catálogo).
-- No bruto: `volume-sat_<recurso>-<id>@AAAAMMDD.csv` e `volume-sat@AAAAMMDD.json` (275 MB, 719.856 registros diários de 4 concessionárias). Conferido em 2026-11-10 pela listagem do bruto: 46 arquivos de dados: 44 CSV de recursos distintos e vigentes (2,1 GB; um diário e um mensal consolidado por concessionária, mais os de nome nu), o JSON e um CSV de nome nu sem manifesto (`volume-sat@20261103.csv`) que tem o mesmo `sha256` do CSV da Via040 e por isso é tratado como cópia dele; 9 manifestos sem arquivo no bruto conferido.
+- No bruto: `volume-sat_<recurso>-<id>@AAAAMMDD.csv` e `volume-sat@AAAAMMDD.json` (275 MB, 719.856 registros diários de 4 concessionárias).
 - O JSON repete concessionárias que têm CSV diário. O CSV manda: a linha do JSON só fica de fora se o CSV diário vigente da mesma concessionária cobre o mesmo mês (nomes comparados sem acento, pontuação nem `S.A.`/`S/A`), e um JSON inteiramente coberto não gera Parquet (`gemeo` no `inventory()`). No bruto conferido o JSON está inteiramente coberto, então o lake não carrega nada dele.
 
 ## Conteúdo
@@ -99,8 +99,7 @@ Descrições do dicionário de dados da ANTT ("Dicionário de Dados - Tráfego d
 
 - **Dupla contagem entre arquivos diário e mensal.** Para cada concessionária o pacote tem um arquivo diário e um mensal consolidado. Conferido (Autopista Fluminense, `...flum-53725139` diário, 58.553 linhas, e `...flum-2789ddd0` mensal, 2.862 linhas): os totais mensais de `volume_total` são idênticos nos dois; o mesmo vale para Elovias, EPR Via Mineira e Nova Rota do Oeste (52.232.405, 80.409.293 e 323.911.139 veículos nos dois). Os dois caem na mesma partição `ano`: **filtre `granularidade = "dia"` (ou `"mes"`) antes de somar**, senão o tráfego é contado duas vezes.
 - **O JSON repete concessionárias que também têm CSV, e não entra.** O JSON traz Nova Rota do Oeste, Motiva Minas SP, EPR Via Mineira e Elovias em registros diários, e as quatro têm CSV diário vigente com as mesmas contagens de registros. O conversor não carrega as linhas do JSON dessas concessionárias nos meses que o CSV diário cobre; o que fica é o CSV. Uma concessionária que tenha só CSV mensal consolidado não cobre o JSON diário, e um mês que só o JSON traz (um CSV que começa depois) continua vindo do JSON.
-- **Recursos de nome nu se somam aos demais.** O bruto tem arquivos de nome nu (`volume-sat@AAAAMMDD.csv`), gravados por versões antigas do fetcher que davam o mesmo nome a recursos diferentes do pacote (Ecovias Minas Goiás, MS Via, Via Bahia, Eco101, entre outros). A versão vigente é escolhida por recurso (URL do manifesto ao lado), então todos entram, cada um no seu Parquet (`volume-sat_<id8>.parquet`). Um arquivo de nome nu sem manifesto ao lado segue a regra do nome (só o mais recente); no bruto conferido, `volume-sat@20260628.csv` está nesse caso.
-- **Manifestos sem arquivo.** Nove manifestos do pacote não têm o CSV no bruto conferido.
+- **Recursos de nome nu se somam aos demais.** O bruto tem arquivos de nome nu (`volume-sat@AAAAMMDD.csv`), gravados por versões antigas do fetcher que davam o mesmo nome a recursos diferentes do pacote (Ecovias Minas Goiás, MS Via, Via Bahia, Eco101, entre outros). A versão vigente é escolhida por recurso (URL do manifesto ao lado), então todos entram, cada um no seu Parquet (`volume-sat_<id8>.parquet`). Um arquivo de nome nu sem manifesto ao lado segue a regra do nome (só o mais recente); um de mesmo carimbo, tamanho e `sha256` de um arquivo com chave (como o `volume-sat@AAAAMMDD.csv` que repete o CSV da Via040) é tratado como cópia.
 - **Data mista.** `dd/mm/aaaa` (diário), `mm/aaaa` (mensal) e `aaaa-mm-dd` (JSON) na mesma coluna.
 - **`faixa_de_velocidade` é faixa** (`21 - 50 KM/h`), não velocidade medida.
 
