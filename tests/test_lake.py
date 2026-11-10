@@ -854,3 +854,26 @@ def test_arquivos_sem_manifesto_seguem_a_regra_do_nome(tmp_path: Path) -> None:
     ds = tmp_path / "lake" / "antt" / "acidentes-rodovias"
     assert _parquets(ds) == ["acidentes-rodovias.parquet"]
     assert _partitions(ds) == {"ano=2025": 1}
+
+
+def test_mesmo_conteudo_sob_dois_nomes_sem_manifesto_entra_uma_vez(
+    tmp_path: Path,
+) -> None:
+    """Sem manifesto nao ha URL; o mesmo carimbo e o mesmo conteudo bastam para
+    nao ler duas vezes (nome nu e nome com chave de recurso)."""
+    raw_dir = _raw(tmp_path, "rodovias")
+    conteudo = "data;km\n01/01/2024;1\n01/02/2024;2\n"
+    nu = raw_dir / "volume-sat@20261103.csv"
+    com_chave = (
+        raw_dir / "volume-sat_trafego-de-veiculos-sat-via040-061f7512@20261103.csv"
+    )
+    for f in (nu, com_chave):
+        f.write_text(conteudo, encoding="utf-8")
+    outro = raw_dir / "volume-sat_trafego-de-veiculos-sat-viasul-2178030c@20261103.csv"
+    outro.write_text("data;km\n01/01/2024;9\n", encoding="utf-8")
+    plan = {p.path.name: p for p in converter.inventory(raw_dir.parent)}
+    assert plan[nu.name].skip_reason == "gemeo"
+    assert plan[com_chave.name].skip_reason is None
+    assert plan[outro.name].skip_reason is None
+    converter.convert(raw_dir.parent, tmp_path / "lake")
+    assert _partitions(tmp_path / "lake" / "antt" / "volume-sat") == {"ano=2024": 3}

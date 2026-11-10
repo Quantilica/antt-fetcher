@@ -20,6 +20,7 @@ from typing import IO
 try:
     import polars as pl
     from quantilica.analytics.lake import ConvertResult, LakeWriter
+    from quantilica.core.files import sha256_file
     from quantilica.core.lake import (
         DatasetDescriptor,
         Planned,
@@ -574,7 +575,49 @@ def _current_versions(files: Sequence[Path]) -> _Current:
             _base_key(keyed[-1]) if keyed else f"{_base_key(winner)}_{resource.id8}"
         )
         twins.update(f for f, _ in current[1:])
+    twins.update(_same_content_twins(selected))
+    for f in twins:
+        selected.pop(f, None)
     return _Current(selected, frozenset(twins), frozenset(superseded))
+
+
+def _same_content_twins(selected: dict[Path, str]) -> set[Path]:
+    """Arquivos de nome nu que repetem, no mesmo carimbo, o conteudo de um arquivo
+    de nome com chave de recurso do mesmo conjunto (o bruto sem manifesto nao diz
+    que sao o mesmo recurso). O nome com chave fica.
+
+    So arquivos do mesmo tamanho sao comparados; o hash vem do manifesto ou do
+    arquivo. Dois nomes com chave de conteudo igual sao recursos diferentes da
+    fonte e ficam os dois.
+    """
+    buckets: dict[tuple[Path, str, str, int], list[Path]] = {}
+    for f in selected:
+        if f.suffix.lower() in _NON_TABULAR_SUFFIXES:
+            continue
+        try:
+            size = f.stat().st_size
+        except OSError:
+            continue
+        key = (f.parent, _slug_of(f.name), _version_stamp(f.name), size)
+        buckets.setdefault(key, []).append(f)
+    twins: set[Path] = set()
+    for group in buckets.values():
+        if len(group) < 2:
+            continue
+        nus = [f for f in group if _base_key(f) == _slug_of(f.name)]
+        keyed = [f for f in group if f not in nus]
+        if not nus or not keyed:
+            continue
+        digests = {_digest(f) for f in keyed}
+        twins.update(f for f in nus if _digest(f) in digests)
+    return twins
+
+
+def _digest(raw_file: Path) -> str:
+    """``sha256`` do manifesto ao lado, ou do proprio arquivo."""
+    return str(_read_manifest(raw_file).get("sha256") or "").lower() or sha256_file(
+        raw_file
+    )
 
 
 class AnttLakeConverter:
