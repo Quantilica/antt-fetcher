@@ -1160,3 +1160,65 @@ def test_outros_conjuntos_nao_ganham_granularidade(tmp_path: Path) -> None:
     converter.convert(raw_dir.parent, tmp_path / "lake")
     f = next((tmp_path / "lake" / "antt" / "acidentes-rodovias").rglob("*.parquet"))
     assert "granularidade" not in pl.read_parquet(f).columns
+
+
+# --- JSON do SAT depende dos CSV: a escrita nao pode ficar velha -------------
+def _linhas_por_concessionaria(ds: Path) -> dict[str, int]:
+    df = pl.concat([pl.read_parquet(f) for f in ds.rglob("*.parquet")], how="diagonal")
+    return dict(df.group_by("concessionaria").agg(pl.len()).iter_rows())
+
+
+def test_volume_sat_csv_que_chega_depois_tira_do_parquet_antigo_do_json(
+    tmp_path: Path,
+) -> None:
+    raw_dir = _raw(tmp_path, "rodovias")
+    lake = tmp_path / "lake"
+    ds = lake / "antt" / "volume-sat"
+    (raw_dir / "volume-sat@20261103.json").write_text(
+        _sat_json(
+            ("NOVA ROTA DO OESTE", [("2025-03-25", 10), ("2025-03-26", 20)]),
+            ("ELOVIAS", [("2025-10-30", 7)]),
+        ),
+        encoding="utf-8",
+    )
+    converter.convert(raw_dir.parent, lake)
+    assert _linhas_por_concessionaria(ds) == {"NOVA ROTA DO OESTE": 2, "ELOVIAS": 1}
+
+    # Chega o CSV diario da Nova Rota: as linhas dela saem do Parquet do JSON.
+    (raw_dir / "volume-sat_trafego-nova-rota-aaaa1111@20261104.csv").write_text(
+        _SAT_CAB
+        + "NOVA ROTA DO OESTE;25/03/2025;10\nNOVA ROTA DO OESTE;26/03/2025;20\n",
+        encoding="utf-8",
+    )
+    res = converter.convert(raw_dir.parent, lake)
+    assert not res.errors, res.errors
+    assert _linhas_por_concessionaria(ds) == {"NOVA ROTA DO OESTE": 2, "ELOVIAS": 1}
+    nomes = _parquets(ds)
+    assert (
+        sum(n.startswith("volume-sat_cov") for n in nomes) == 1
+    )  # JSON, nova identidade
+    assert "volume-sat.parquet" not in nomes  # o Parquet antigo do JSON sumiu
+    # Estavel: a terceira execucao nao reescreve nada.
+    again = converter.convert(raw_dir.parent, lake)
+    assert again.converted == 0
+
+
+def test_volume_sat_json_que_fica_todo_coberto_perde_o_parquet(tmp_path: Path) -> None:
+    raw_dir = _raw(tmp_path, "rodovias")
+    lake = tmp_path / "lake"
+    ds = lake / "antt" / "volume-sat"
+    (raw_dir / "volume-sat@20261103.json").write_text(
+        _sat_json(("ELOVIAS", [("2025-10-30", 7), ("2024-01-02", 3)])),
+        encoding="utf-8",
+    )
+    converter.convert(raw_dir.parent, lake)
+    assert _linhas_por_concessionaria(ds) == {"ELOVIAS": 2}
+    (raw_dir / "volume-sat_trafego-elovias-bbbb2222@20261104.csv").write_text(
+        _SAT_CAB + "ELOVIAS;30/10/2025;7\nELOVIAS;02/01/2024;3\n", encoding="utf-8"
+    )
+    for force in (False, True):  # com --force o JSON coberto tambem nao volta
+        res = converter.convert(raw_dir.parent, lake, force=force)
+        assert not res.errors, res.errors
+        assert _linhas_por_concessionaria(ds) == {"ELOVIAS": 2}
+        assert not any(n.startswith("volume-sat.") for n in _parquets(ds))
+        assert len(_parquets(ds)) == 2  # os dois anos do CSV, nada do JSON

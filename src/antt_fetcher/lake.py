@@ -26,6 +26,7 @@ try:
         DatasetDescriptor,
         Planned,
         composite_file_key,
+        dataset_lock,
         file_key,
         partition_types_for,
         select_current,
@@ -516,6 +517,43 @@ def _covered_by_csv(selected: Iterable[Path], ds_id: str) -> frozenset[str]:
     return _daily_concessionaires(csv_files, ds_id)
 
 
+def _json_coverage(
+    json_file: Path, ds_id: str, selected: Iterable[Path]
+) -> tuple[frozenset[str], bool]:
+    """Concessionarias do JSON que ja entram pelos CSV diarios, e se o JSON ficou
+    todo coberto (nada dele precisa ser escrito)."""
+    covered = _covered_by_csv(selected, ds_id)
+    names = _json_concessionaires(json_file)
+    return frozenset(names & covered), bool(names) and names <= covered
+
+
+def _json_key(base: str, skipped: frozenset[str]) -> str:
+    """Chave do Parquet do JSON: a base mais um hash do que sai dele, de modo que
+    a mesma entrada com outra cobertura nao seja pulada como ja convertida."""
+    if not skipped:
+        return base
+    digest = hashlib.sha1("\n".join(sorted(skipped)).encode("utf-8")).hexdigest()  # noqa: S324
+    return f"{base}_cov{digest[:8]}"
+
+
+def _purge_json_parquets(dataset_dir: Path, base: str, keep: str | None) -> list[Path]:
+    """Remove, de todas as particoes, os Parquets da chave do JSON (``base`` e
+    ``base_cov<hash>``, com ou sem ``-NNN``) que nao sao ``keep``."""
+    pattern = re.compile(
+        rf"^({re.escape(base)}(?:_cov[0-9a-f]{{8}})?)(?:-\d{{3}})?\.parquet$"
+    )
+    removed: list[Path] = []
+    if not dataset_dir.is_dir():
+        return removed
+    with dataset_lock(dataset_dir):
+        for path in sorted(dataset_dir.glob("ano=*/*.parquet")):
+            match = pattern.match(path.name)
+            if match and match[1] != keep:
+                path.unlink()
+                removed.append(path)
+    return removed
+
+
 def _norm_expr(column: str) -> pl.Expr:
     """``_norm_col`` como expressao do Polars (sem acento, minusculas, ``_``)."""
     return (
@@ -878,16 +916,32 @@ class AnttLakeConverter:
                 ds_id = _dataset_of(raw_file.name, label)
                 if not ds_id or ds_id not in writers:
                     continue
-                skip = (
-                    _covered_by_csv(current.selected, ds_id)
-                    if name is None and raw_file.suffix.lower() == ".json"
-                    else frozenset()
-                )
                 # Cada membro e uma origem propria no lake (chave composta
                 # zip+membro): o sha256 do ZIP e o mesmo para todos os membros.
                 key = composite_file_key(
                     f"{current.selected[raw_file]}.csv", name
                 ).lower()
+                skip: frozenset[str] = frozenset()
+                if name is None and raw_file.suffix.lower() == ".json":
+                    dataset_dir = lake_path / self.source_id / ds_id
+                    try:
+                        skip, fully_covered = _json_coverage(
+                            raw_file, ds_id, current.selected
+                        )
+                        base = key
+                        key = _json_key(base, skip)
+                        # O JSON depende dos CSV: a identidade da escrita inclui o
+                        # que sai dele, e o Parquet de uma identidade anterior (ou
+                        # o JSON que ficou todo coberto) e removido de todas as
+                        # particoes, porque o LakeWriter so mexe nas que reescreve.
+                        _purge_json_parquets(
+                            dataset_dir, base, None if fully_covered else key
+                        )
+                    except Exception as exc:
+                        res.errors.append(f"Erro ao ler {raw_file.name}: {exc}")
+                        continue
+                    if fully_covered:
+                        continue
                 try:
                     with _member_as_text(raw_file, name) as csv_path:
                         self._convert_member(
