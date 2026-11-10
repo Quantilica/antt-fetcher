@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import codecs
-import csv
 import hashlib
 import json
 import logging
@@ -15,6 +14,7 @@ import zipfile
 from collections.abc import Callable, Iterable, Iterator, Sequence
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import IO
 from urllib.parse import urlsplit
@@ -457,84 +457,127 @@ def _is_readable(raw_file: Path) -> bool:
     return suffix == ".json" and _slug_of(raw_file.name) in JSON_DATASETS
 
 
-_SAMPLE_BYTES = 256 * 1024
+# --- Cobertura do JSON pelos CSV diarios (concessionaria, mes) ----------------
+Pair = tuple[str, str]  # (concessionaria normalizada, ``AAAA-MM``)
+_UNKNOWN: Pair = ("", "")  # registro do JSON sem concessionaria ou sem data
+
+_DMY = r"^\s*\d{1,2}/(\d{1,2})/(\d{4})"
+_YMD = r"^\s*(\d{4})-(\d{1,2})(?:\D|$)"
+_MY = r"^\s*(\d{1,2})/(\d{4})\s*$"
+_SA_SUFFIX = re.compile(r"\bs\s*[./]\s*a\b\.?|\bsa\s*$")
 
 
-def _sample_rows(csv_path: Path) -> tuple[list[str], list[list[str]]]:
-    """Cabecalho (nomes normalizados) e linhas do inicio de um CSV, sem lê-lo
-    inteiro: ate ``_SAMPLE_BYTES``, sem a ultima linha se o corte a partiu."""
-    with open(csv_path, "rb") as fh:
-        data = fh.read(_SAMPLE_BYTES)
-        cut = bool(fh.read(1))
-    try:
-        text = codecs.getincrementaldecoder(_UTF8)().decode(data)
-    except UnicodeDecodeError:
-        text = data.decode(_LEGACY, errors="quantilica_c1")
-    lines = text.splitlines()
-    if cut and lines:
-        lines.pop()
-    if not lines:
-        return [], []
-    sep = ";" if ";" in lines[0] else ","
-    rows = list(csv.reader(lines, delimiter=sep))
-    return [_norm_col(c) for c in rows[0]], rows[1:]
+def _norm_conc(name: str) -> str:
+    """Nome de concessionaria comparavel: sem acento, minusculas, sem ``S.A.`` /
+    ``S/A`` / ``SA`` no fim e com espacos e pontuacao reduzidos a ``_``."""
+    text = unicodedata.normalize("NFKD", name.strip().lower())
+    text = text.encode("ascii", "ignore").decode("ascii")
+    text = _SA_SUFFIX.sub(" ", text)
+    return re.sub(r"[^a-z0-9]+", "_", text).strip("_")
 
 
-def _daily_concessionaires(csv_files: Sequence[Path], ds_id: str) -> frozenset[str]:
-    """Concessionarias (nome normalizado) com linhas diarias nos CSV, lidas do
-    inicio de cada arquivo (cada CSV do pacote e de uma concessionaria)."""
-    covered: set[str] = set()
-    for csv_file in csv_files:
-        try:
-            header, rows = _sample_rows(csv_file)
-        except OSError:
-            continue
-        date_col = next((c for c in YEAR_COLUMNS[ds_id] if c in header), None)
-        if "concessionaria" not in header or date_col is None:
-            continue
-        who, when = header.index("concessionaria"), header.index(date_col)
-        for row in rows:
-            if len(row) > max(who, when) and re.match(_DAY_VALUE, row[when]):
-                covered.add(_norm_col(row[who]))
-    return frozenset(covered)
+def _month_of(value: str) -> str | None:
+    """``AAAA-MM`` de uma data ``dd/mm/aaaa``, ``aaaa-mm-dd`` ou ``mm/aaaa``."""
+    for pattern, order in ((_DMY, "mY"), (_YMD, "Ym"), (_MY, "mY")):
+        if match := re.match(pattern, value):
+            parts = dict(zip(order, match.groups(), strict=True))
+            if 1 <= int(parts["m"]) <= 12:
+                return f"{parts['Y']}-{int(parts['m']):02d}"
+            return None
+    return None
 
 
-def _json_concessionaires(json_file: Path) -> frozenset[str]:
-    """Concessionarias (nome normalizado) do JSON, lidas linha a linha."""
-    pattern = re.compile(r'"concessionaria"\s*:\s*"((?:[^"\\]|\\.)*)"')
-    found: set[str] = set()
+def _month_expr(column: str) -> pl.Expr:
+    """``_month_of`` como expressao do Polars."""
+    value = pl.col(column).cast(pl.String)
+    year = pl.coalesce(
+        value.str.extract(_DMY, 2),
+        value.str.extract(_YMD, 1),
+        value.str.extract(_MY, 2),
+    )
+    month = pl.coalesce(
+        value.str.extract(_DMY, 1),
+        value.str.extract(_YMD, 2),
+        value.str.extract(_MY, 1),
+    ).cast(pl.Int32, strict=False)
+    return (
+        pl.when(month.is_between(1, 12))
+        .then(pl.format("{}-{}", year, month.cast(pl.String).str.zfill(2)))
+        .otherwise(None)
+    )
+
+
+def _json_pairs(json_file: Path, ds_id: str) -> frozenset[Pair]:
+    """Pares (concessionaria, mes) do JSON, lidos linha a linha. Registro sem
+    concessionaria ou sem data entra como ``_UNKNOWN``: nunca esta coberto."""
+    conc = re.compile(r'"concessionaria"\s*:\s*"((?:[^"\\]|\\.)*)"')
+    date = re.compile(
+        r'"(?:' + "|".join(YEAR_COLUMNS[ds_id]) + r')"\s*:\s*"((?:[^"\\]|\\.)*)"'
+    )
+    found: set[Pair] = set()
     with open(json_file, encoding="utf-8-sig") as fh:
         for line in fh:
-            for match in pattern.finditer(line):
-                found.add(_norm_col(json.loads(f'"{match[1]}"')))
+            if not line.strip():
+                continue
+            c, d = conc.search(line), date.search(line)
+            month = _month_of(json.loads(f'"{d[1]}"')) if d else None
+            if c and month:
+                found.add((_norm_conc(json.loads(f'"{c[1]}"')), month))
+            else:
+                found.add(_UNKNOWN)
     return frozenset(found)
 
 
-def _covered_by_csv(selected: Iterable[Path], ds_id: str) -> frozenset[str]:
-    """Concessionarias que ja entram pelos CSV diarios vigentes de ``ds_id``."""
-    csv_files = [
-        f for f in selected if f.suffix.lower() == ".csv" and _slug_of(f.name) == ds_id
-    ]
-    return _daily_concessionaires(csv_files, ds_id)
+@lru_cache(maxsize=512)
+def _csv_pairs_cached(
+    path: str, size: int, mtime_ns: int, ds_id: str
+) -> frozenset[Pair]:
+    raw_csv = Path(path)
+    with _member_as_text(raw_csv, None) as text_path:
+        lf, names = _scan_text(text_path, ds_id, raw_csv.name)
+        date_col = next((c for c in YEAR_COLUMNS[ds_id] if c in names), None)
+        if "concessionaria" not in names or date_col is None:
+            return frozenset()
+        granularity = _file_granularity(
+            lf, date_col, _source_url_name(raw_csv), raw_csv.name
+        )
+        if granularity != "dia":  # o mensal consolidado nao cobre o JSON diario
+            return frozenset()
+        distinct = lf.select("concessionaria", date_col).unique().collect()
+    return frozenset(
+        (_norm_conc(c), m)
+        for c, d in distinct.iter_rows()
+        if c is not None and d is not None and (m := _month_of(d)) is not None
+    )
+
+
+def _csv_pairs(raw_csv: Path, ds_id: str) -> frozenset[Pair]:
+    """Pares (concessionaria, mes) que um CSV DIARIO traz, lidos do arquivo inteiro
+    (so as duas colunas, em streaming); vazio para o mensal consolidado."""
+    st = raw_csv.stat()
+    return _csv_pairs_cached(str(raw_csv), st.st_size, st.st_mtime_ns, ds_id)
 
 
 def _json_coverage(
     json_file: Path, ds_id: str, selected: Iterable[Path]
-) -> tuple[frozenset[str], bool]:
-    """Concessionarias do JSON que ja entram pelos CSV diarios, e se o JSON ficou
+) -> tuple[frozenset[Pair], bool]:
+    """Pares do JSON que ja entram pelos CSV diarios vigentes, e se o JSON ficou
     todo coberto (nada dele precisa ser escrito)."""
-    covered = _covered_by_csv(selected, ds_id)
-    names = _json_concessionaires(json_file)
-    return frozenset(names & covered), bool(names) and names <= covered
+    covered: set[Pair] = set()
+    for f in selected:
+        if f.suffix.lower() == ".csv" and _slug_of(f.name) == ds_id:
+            covered |= _csv_pairs(f, ds_id)
+    pairs = _json_pairs(json_file, ds_id)
+    return frozenset(pairs & covered), bool(pairs) and pairs <= covered
 
 
-def _json_key(base: str, skipped: frozenset[str]) -> str:
+def _json_key(base: str, skipped: frozenset[Pair]) -> str:
     """Chave do Parquet do JSON: a base mais um hash do que sai dele, de modo que
     a mesma entrada com outra cobertura nao seja pulada como ja convertida."""
     if not skipped:
         return base
-    digest = hashlib.sha1("\n".join(sorted(skipped)).encode("utf-8")).hexdigest()  # noqa: S324
-    return f"{base}_cov{digest[:8]}"
+    text = "\n".join(f"{c}|{m}" for c, m in sorted(skipped))
+    return f"{base}_cov{hashlib.sha1(text.encode('utf-8')).hexdigest()[:8]}"  # noqa: S324
 
 
 def _purge_json_parquets(dataset_dir: Path, base: str, keep: str | None) -> list[Path]:
@@ -553,19 +596,6 @@ def _purge_json_parquets(dataset_dir: Path, base: str, keep: str | None) -> list
                 path.unlink()
                 removed.append(path)
     return removed
-
-
-def _norm_expr(column: str) -> pl.Expr:
-    """``_norm_col`` como expressao do Polars (sem acento, minusculas, ``_``)."""
-    return (
-        pl.col(column)
-        .cast(pl.String)
-        .str.to_lowercase()
-        .str.normalize("NFKD")
-        .str.replace_all(r"\p{M}+", "")
-        .str.replace_all(r"[^a-z0-9]+", "_")
-        .str.strip_chars("_")
-    )
 
 
 def _source_url_name(raw_file: Path) -> str:
@@ -800,6 +830,87 @@ def _file_granularity(
     return "mes" if month_like / total >= MONTHLY_SHARE else "dia"
 
 
+def _scan_text(
+    csv_path: Path, ds_id: str, label: str
+) -> tuple[pl.LazyFrame, list[str]]:
+    """Leitura preguicosa do texto tabular (CSV em UTF-8 ou NDJSON) como texto,
+    com os nomes de coluna normalizados. Devolve o quadro e os nomes."""
+    # Tudo como texto (convencao do lake): o esquema nao depende de quantas
+    # linhas a inferencia viu e codigos nao perdem zeros a esquerda.
+    if csv_path.suffix == ".ndjson":
+        lf = pl.scan_ndjson(csv_path, infer_schema_length=None).select(
+            pl.all().cast(pl.String)
+        )
+    else:
+        sep = _detect_separator(csv_path)
+        with csv_path.open(encoding="utf8", errors="replace") as fh:
+            sample = [fh.readline().rstrip("\r\n") for _ in range(200)]
+        first = sample[0]
+        header = HEADERLESS_COLUMNS.get(ds_id)
+        if header and _is_headerless(first, sep, header):
+            lf = pl.scan_csv(
+                csv_path,
+                separator=sep,
+                has_header=False,
+                new_columns=list(header),
+                infer_schema=False,
+                encoding="utf8",
+            )
+        else:
+            # Arquivo sem campo entre aspas: uma aspa solta no dado (`D"AVILA`
+            # no rntrc antigo) abriria um campo e engoliria as linhas seguintes.
+            # Com aspas, a aspa interna sem escape e escapada antes da leitura.
+            quoted = _has_quoted_fields(sample, sep)
+            if quoted and (n := _repair_stray_quotes(csv_path, sep)):
+                logger.warning(
+                    "ANTT %s: %d linha(s) com aspa sem escape reparada(s)", label, n
+                )
+            lf = pl.scan_csv(
+                csv_path,
+                separator=sep,
+                infer_schema=False,
+                encoding="utf8",
+                quote_char='"' if quoted else None,
+            )
+    columns = lf.collect_schema().names()
+    lf = lf.rename({c: _norm_col(c) for c in columns})
+    return lf, [_norm_col(c) for c in columns]
+
+
+def _without_pairs(
+    lf: pl.LazyFrame, names: list[str], ds_id: str, pairs: frozenset[Pair]
+) -> pl.LazyFrame:
+    """Tira as linhas cuja (concessionaria normalizada, mes) esta em ``pairs``.
+    Linha sem concessionaria ou sem data valida fica."""
+    date_col = next((c for c in YEAR_COLUMNS[ds_id] if c in names), None)
+    if "concessionaria" not in names or date_col is None:
+        return lf
+    distinct = lf.select("concessionaria").unique().collect()
+    mapping = pl.DataFrame(
+        {
+            "concessionaria": distinct["concessionaria"],
+            "_c": [
+                _norm_conc(c) if c is not None else None
+                for c in distinct["concessionaria"]
+            ],
+        }
+    )
+    covered = pl.DataFrame(
+        {
+            "_c": [c for c, _ in sorted(pairs)],
+            "_m": [m for _, m in sorted(pairs)],
+            "_cobertura": [True] * len(pairs),
+        }
+    )
+    return (
+        lf.join(mapping.lazy(), on="concessionaria", how="left")
+        .with_columns(_month_expr(date_col).alias("_m"))
+        .join(covered.lazy(), on=["_c", "_m"], how="left")
+        .filter(pl.col("_cobertura").is_null())
+        .drop("_c", "_m", "_cobertura")
+    )
+
+
 class AnttLakeConverter:
     """Universal Hive Parquet Lake converter for ANTT datasets."""
 
@@ -847,8 +958,16 @@ class AnttLakeConverter:
                 plan.append(Planned(raw_file, skip_reason="nao_tabular"))
                 continue
             if names is None and suffix == ".json" and _is_readable(raw_file):
-                covered = _covered_by_csv(current.selected, _slug_of(raw_file.name))
-                if _json_concessionaires(raw_file) <= covered:
+                try:
+                    _, fully_covered = _json_coverage(
+                        raw_file, _slug_of(raw_file.name), current.selected
+                    )
+                except Exception as exc:  # sem cobertura conhecida: planeja o JSON
+                    logger.warning(
+                        "ANTT %s: cobertura ilegivel: %s", raw_file.name, exc
+                    )
+                    fully_covered = False
+                if fully_covered:
                     plan.append(Planned(raw_file, skip_reason="gemeo"))
                     continue
             labels: list[str | None] = [None] if names is None else list(names)
@@ -935,7 +1054,7 @@ class AnttLakeConverter:
                 key = composite_file_key(
                     f"{current.selected[raw_file]}.csv", name
                 ).lower()
-                skip: frozenset[str] = frozenset()
+                skip: frozenset[Pair] = frozenset()
                 if name is None and raw_file.suffix.lower() == ".json":
                     dataset_dir = lake_path / self.source_id / ds_id
                     try:
@@ -966,7 +1085,7 @@ class AnttLakeConverter:
                             csv_path,
                             label,
                             res,
-                            skip_concessionaires=skip,
+                            skip_pairs=skip,
                         )
                 except Exception as exc:
                     res.errors.append(
@@ -985,59 +1104,16 @@ class AnttLakeConverter:
         label: str,
         res: ConvertResult,
         *,
-        skip_concessionaires: frozenset[str] = frozenset(),
+        skip_pairs: frozenset[Pair] = frozenset(),
     ) -> None:
         """Escreve um membro, uma particao ``ano`` por vez (lazy, streaming).
 
-        ``skip_concessionaires`` (nomes normalizados) sao concessionarias que o
-        JSON repete e que ja entram pelo CSV diario: suas linhas ficam de fora.
+        ``skip_pairs`` sao os pares (concessionaria, mes) que o JSON repete e que
+        ja entram pelo CSV diario: as linhas deles ficam de fora.
         """
-        # Tudo como texto (convencao do lake): o esquema nao depende de quantas
-        # linhas a inferencia viu e codigos nao perdem zeros a esquerda.
-        if csv_path.suffix == ".ndjson":
-            lf = pl.scan_ndjson(csv_path, infer_schema_length=None).select(
-                pl.all().cast(pl.String)
-            )
-        else:
-            sep = _detect_separator(csv_path)
-            with csv_path.open(encoding="utf8", errors="replace") as fh:
-                sample = [fh.readline().rstrip("\r\n") for _ in range(200)]
-            first = sample[0]
-            header = HEADERLESS_COLUMNS.get(ds_id)
-            if header and _is_headerless(first, sep, header):
-                lf = pl.scan_csv(
-                    csv_path,
-                    separator=sep,
-                    has_header=False,
-                    new_columns=list(header),
-                    infer_schema=False,
-                    encoding="utf8",
-                )
-            else:
-                # Arquivo sem campo entre aspas: uma aspa solta no dado (`D"AVILA`
-                # no rntrc antigo) abriria um campo e engoliria as linhas seguintes.
-                # Com aspas, a aspa interna sem escape e escapada antes da leitura.
-                quoted = _has_quoted_fields(sample, sep)
-                if quoted and (n := _repair_stray_quotes(csv_path, sep)):
-                    logger.warning(
-                        "ANTT %s: %d linha(s) com aspa sem escape reparada(s)",
-                        label,
-                        n,
-                    )
-                lf = pl.scan_csv(
-                    csv_path,
-                    separator=sep,
-                    infer_schema=False,
-                    encoding="utf8",
-                    quote_char='"' if quoted else None,
-                )
-        columns = lf.collect_schema().names()
-        names = [_norm_col(c) for c in columns]
-        lf = lf.rename({c: _norm_col(c) for c in columns})
-        if skip_concessionaires and "concessionaria" in names:
-            lf = lf.filter(
-                ~_norm_expr("concessionaria").is_in(sorted(skip_concessionaires))
-            )
+        lf, names = _scan_text(csv_path, ds_id, label)
+        if skip_pairs:
+            lf = _without_pairs(lf, names, ds_id, skip_pairs)
         if lf.head(1).collect().height == 0:
             return
 

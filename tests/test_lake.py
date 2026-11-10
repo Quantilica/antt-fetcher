@@ -1273,3 +1273,81 @@ def test_volume_sat_json_que_fica_todo_coberto_perde_o_parquet(tmp_path: Path) -
         assert _linhas_por_concessionaria(ds) == {"ELOVIAS": 2}
         assert not any(n.startswith("volume-sat.") for n in _parquets(ds))
         assert len(_parquets(ds)) == 2  # os dois anos do CSV, nada do JSON
+
+
+# --- cobertura do JSON por (concessionaria, mes) -----------------------------
+def test_volume_sat_csv_diario_so_cobre_os_meses_que_traz(tmp_path: Path) -> None:
+    """Um CSV diario que comeca em 2025 nao elimina do JSON as linhas de 2024 da
+    mesma concessionaria."""
+    raw_dir = _raw(tmp_path, "rodovias")
+    (raw_dir / "volume-sat_trafego-nova-rota-aaaa1111@20261104.csv").write_text(
+        _SAT_CAB
+        + "NOVA ROTA DO OESTE;25/03/2025;10\nNOVA ROTA DO OESTE;26/03/2025;20\n",
+        encoding="utf-8",
+    )
+    (raw_dir / "volume-sat@20261103.json").write_text(
+        _sat_json(
+            (
+                "NOVA ROTA DO OESTE",
+                [("2024-05-02", 1), ("2025-03-25", 10), ("2025-03-26", 20)],
+            )
+        ),
+        encoding="utf-8",
+    )
+    plan = {p.path.name: p for p in converter.inventory(raw_dir.parent)}
+    assert plan["volume-sat@20261103.json"].skip_reason is None  # nao esta coberto
+    res = converter.convert(raw_dir.parent, tmp_path / "lake")
+    assert not res.errors, res.errors
+    ds = tmp_path / "lake" / "antt" / "volume-sat"
+    assert _partitions(ds) == {"ano=2024": 1, "ano=2025": 2}  # 2024 vem do JSON
+
+
+def test_volume_sat_cobertura_le_o_csv_inteiro_nao_so_o_inicio(
+    tmp_path: Path,
+) -> None:
+    raw_dir = _raw(tmp_path, "rodovias")
+    linhas = "".join(f"OUTRA;{d:02d}/01/2025;1\n" for d in range(1, 29)) * 700
+    linhas += "ELOVIAS;30/10/2025;7\n"  # depois de mais de 256 KB
+    csv = raw_dir / "volume-sat_trafego-x-aaaa1111@20261104.csv"
+    csv.write_text(_SAT_CAB + linhas, encoding="utf-8")
+    assert csv.stat().st_size > 256 * 1024
+    (raw_dir / "volume-sat@20261103.json").write_text(
+        _sat_json(("ELOVIAS", [("2025-10-30", 7)])), encoding="utf-8"
+    )
+    plan = {p.path.name: p for p in converter.inventory(raw_dir.parent)}
+    assert plan["volume-sat@20261103.json"].skip_reason == "gemeo"
+
+
+def test_volume_sat_nomes_com_sa_acento_e_espaco_sao_o_mesmo(tmp_path: Path) -> None:
+    from antt_fetcher.lake import _norm_conc
+
+    assert (
+        _norm_conc("  Ecovias  Minas Goiás S.A. ")
+        == _norm_conc("ECOVIAS MINAS GOIAS S/A")
+        == _norm_conc("ecovias minas goias")
+        == "ecovias_minas_goias"
+    )
+    assert _norm_conc("VIA 040") != _norm_conc("VIA 04")
+    raw_dir = _raw(tmp_path, "rodovias")
+    (raw_dir / "volume-sat_trafego-goias-aaaa1111@20261104.csv").write_text(
+        _SAT_CAB + "ECOVIAS MINAS GOIAS S/A;10/08/2022;3\n", encoding="utf-8"
+    )
+    (raw_dir / "volume-sat@20261103.json").write_text(
+        _sat_json(("Ecovias Minas Goiás S.A.", [("2022-08-10", 3)])),
+        encoding="utf-8",
+    )
+    plan = {p.path.name: p for p in converter.inventory(raw_dir.parent)}
+    assert plan["volume-sat@20261103.json"].skip_reason == "gemeo"
+
+
+def test_mes_em_python_e_em_polars_concordam() -> None:
+    from antt_fetcher.lake import _month_expr, _month_of
+
+    valores = [
+        "25/03/2025", "5/3/2025", "2025-03-25", "2025-3-5", "03/2025", "3/2025",
+        "2025-03", "13/2025", "31/13/2025", "sem data", "", " 25/03/2025 ",
+    ]  # fmt: skip
+    df = pl.DataFrame({"d": valores})
+    em_polars = df.select(_month_expr("d").alias("m"))["m"].to_list()
+    assert em_polars == [_month_of(v) for v in valores]
+    assert _month_of("25/03/2025") == "2025-03" and _month_of("13/2025") is None
