@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import codecs
+import hashlib
 import json
 import logging
 import os
@@ -12,6 +13,7 @@ import unicodedata
 import zipfile
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import AbstractContextManager, contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import IO
 
@@ -22,6 +24,7 @@ try:
         DatasetDescriptor,
         Planned,
         composite_file_key,
+        file_key,
         partition_types_for,
         select_current,
     )
@@ -444,6 +447,136 @@ def _source_url_name(raw_file: Path) -> str:
     return str(url).split("?", 1)[0].rsplit("/", 1)[-1]
 
 
+# --- Identidade do recurso e versao vigente ---------------------------------
+# O nome local ``<slug>@AAAAMMDD`` nao identifica o recurso: versoes antigas do
+# fetcher davam o mesmo nome nu a recursos diferentes do pacote (um por mes, ano
+# ou concessionaria). O que identifica o recurso e a URL do manifesto; versoes do
+# mesmo recurso se substituem (vale o carimbo mais novo) e recursos diferentes
+# coexistem. Arquivo sem manifesto (ou sem URL) so tem o nome como identidade.
+_RESOURCE_UUID = re.compile(
+    r"/resource/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/",
+    re.IGNORECASE,
+)
+_VERSION_STAMP = re.compile(r"@(\d{8})(?:T(\d{6}))?(?:\.[A-Za-z0-9]+)+$")
+
+
+@dataclass(frozen=True)
+class _Resource:
+    """Recurso da fonte de um arquivo bruto, lido da URL do manifesto."""
+
+    ident: str  # id do recurso no CKAN, ou a URL sem consulta
+    id8: str  # os 8 caracteres que o fetcher poe no fim do nome local
+    fetched_at: str
+
+
+def _read_manifest(raw_file: Path) -> dict[str, object]:
+    manifest = raw_file.with_name(raw_file.name + ".manifest.json")
+    try:
+        data = json.loads(manifest.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _resource_of(raw_file: Path) -> _Resource | None:
+    """Recurso do arquivo (URL do manifesto ao lado); ``None`` sem URL."""
+    data = _read_manifest(raw_file)
+    url = str(data.get("url") or "").split("?", 1)[0].strip()
+    if not url:
+        return None
+    match = _RESOURCE_UUID.search(url)
+    if match:
+        ident = match[1].lower()
+        id8 = ident[:8]
+    else:
+        ident = url
+        id8 = hashlib.sha1(url.encode("utf-8")).hexdigest()[:8]  # noqa: S324
+    return _Resource(
+        ident,
+        id8,
+        str(data.get("fetched_at") or ""),
+    )
+
+
+def _version_stamp(filename: str) -> str:
+    """Carimbo ``@AAAAMMDD[THHMMSS]`` do nome local (``''`` se nao houver)."""
+    match = _VERSION_STAMP.search(Path(filename.replace("\\", "/")).name)
+    return f"{match[1]}{match[2] or '000000'}" if match else ""
+
+
+def _base_key(raw_file: Path) -> str:
+    return file_key(raw_file).lower()
+
+
+def _is_keyed(raw_file: Path, resource: _Resource) -> bool:
+    """O nome local ja traz a chave do recurso (``<slug>_<nome>-<id8>``)?"""
+    return _base_key(raw_file).endswith(f"-{resource.id8}")
+
+
+@dataclass(frozen=True)
+class _Current:
+    """Versoes vigentes de uma pasta do bruto.
+
+    ``selected`` guarda cada arquivo vigente com a chave-base do seu Parquet;
+    ``twins`` os arquivos que repetem o conteudo de um vigente (mesmo recurso,
+    mesmo carimbo) sob outro nome; ``superseded`` as versoes antigas.
+    """
+
+    selected: dict[Path, str]
+    twins: frozenset[Path]
+    superseded: frozenset[Path]
+
+
+def _current_versions(files: Sequence[Path]) -> _Current:
+    """Escolhe a versao vigente de cada arquivo bruto.
+
+    Arquivo com recurso conhecido (URL no manifesto) e agrupado por pasta e
+    recurso: vale o carimbo mais novo; se ha mais de um arquivo no mesmo carimbo
+    (o mesmo recurso sob o nome nu e sob o nome com chave), fica um so: o de nome
+    com chave, depois o baixado por ultimo. A chave do Parquet e a do nome com
+    chave do recurso; um nome nu ganha o sufixo ``_<id8>`` do recurso, para que
+    recursos diferentes de mesmo nome nao compartilhem o Parquet. Arquivo sem
+    URL segue a regra do nome (``select_current``).
+    """
+    by_resource: dict[tuple[str, str], list[tuple[Path, _Resource]]] = {}
+    by_name: list[Path] = []
+    for f in files:
+        resource = _resource_of(f)
+        if resource is None:
+            by_name.append(f)
+        else:
+            by_resource.setdefault((f.parent.as_posix(), resource.ident), []).append(
+                (f, resource)
+            )
+
+    selected: dict[Path, str] = {}
+    twins: set[Path] = set()
+    superseded: set[Path] = set()
+    for f in select_current(by_name):
+        selected[f] = _base_key(f)
+    superseded.update(set(by_name) - set(selected))
+
+    for versions in by_resource.values():
+        newest = max(_version_stamp(f.name) for f, _ in versions)
+        current = [fr for fr in versions if _version_stamp(fr[0].name) == newest]
+        superseded.update(f for f, _ in versions if _version_stamp(f.name) != newest)
+        # Mesmo carimbo: o baixado por ultimo primeiro, depois o nome com chave
+        # (o do fetcher atual) antes do nome nu; o nome desempata.
+        current.sort(key=lambda fr: fr[0].name)
+        current.sort(key=lambda fr: fr[1].fetched_at, reverse=True)
+        current.sort(key=lambda fr: not _is_keyed(*fr))
+        winner, resource = current[0]
+        keyed = sorted(
+            (f for f, r in versions if _is_keyed(f, r)),
+            key=lambda f: (_version_stamp(f.name), f.name),
+        )
+        selected[winner] = (
+            _base_key(keyed[-1]) if keyed else f"{_base_key(winner)}_{resource.id8}"
+        )
+        twins.update(f for f, _ in current[1:])
+    return _Current(selected, frozenset(twins), frozenset(superseded))
+
+
 class AnttLakeConverter:
     """Universal Hive Parquet Lake converter for ANTT datasets."""
 
@@ -473,10 +606,13 @@ class AnttLakeConverter:
             and not f.name.endswith(".manifest.json")
             and not f.name.endswith(".tmp")
         )
-        current = set(select_current(files))
+        current = _current_versions(files)
         plan: list[Planned] = []
         for raw_file in files:
-            if raw_file not in current:
+            if raw_file in current.twins:
+                plan.append(Planned(raw_file, skip_reason="gemeo"))
+                continue
+            if raw_file not in current.selected:
                 plan.append(Planned(raw_file, skip_reason="superado"))
                 continue
             try:
@@ -545,9 +681,9 @@ class AnttLakeConverter:
             and not f.name.endswith(".manifest.json")
             and not f.name.endswith(".tmp")
         ]
-        active_files = [Path(f) for f in select_current(all_raw_files)]
+        current = _current_versions(sorted(all_raw_files))
 
-        for raw_file in active_files:
+        for raw_file in sorted(current.selected):
             try:
                 names = _csv_member_names(raw_file)
             except (OSError, zipfile.BadZipFile) as exc:
@@ -569,7 +705,9 @@ class AnttLakeConverter:
                     continue
                 # Cada membro e uma origem propria no lake (chave composta
                 # zip+membro): o sha256 do ZIP e o mesmo para todos os membros.
-                key = composite_file_key(raw_file, name).lower()
+                key = composite_file_key(
+                    f"{current.selected[raw_file]}.csv", name
+                ).lower()
                 try:
                     with _member_as_text(raw_file, name) as csv_path:
                         self._convert_member(

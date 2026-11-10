@@ -695,3 +695,162 @@ def test_volume_radar_sem_cabecalho_usa_o_cabecalho_do_conjunto(
     df = pl.read_parquet(next((ds / "ano=2022").glob("*.parquet")))
     assert df["concessionaria"].to_list() == ["AUTOPISTA"]
     assert df["volume_total"].to_list() == ["650"]
+
+
+# --- identidade por recurso (URL do manifesto) -------------------------------
+_RES = "https://dados.antt.gov.br/dataset/pkg/resource/{rid}/download/{nome}"
+_RID_A = "aaaa1111-0000-4000-8000-000000000001"
+_RID_B = "bbbb2222-0000-4000-8000-000000000002"
+_RID_C = "cccc3333-0000-4000-8000-000000000003"
+
+
+def _raw_com_manifesto(
+    raw_dir: Path, name: str, rid: str, nome_fonte: str, linhas: str, sha: str = ""
+) -> Path:
+    """Arquivo bruto sintético com o manifesto do recurso ``rid`` ao lado."""
+    import json
+
+    raw = raw_dir / name
+    raw.write_text("data;km\n" + linhas, encoding="utf-8")
+    Path(str(raw) + ".manifest.json").write_text(
+        json.dumps({"url": _RES.format(rid=rid, nome=nome_fonte), "sha256": sha}),
+        encoding="utf-8",
+    )
+    return raw
+
+
+def _parquets(ds: Path) -> list[str]:
+    return sorted(p.name for p in ds.rglob("*.parquet"))
+
+
+def test_nome_nu_de_recursos_diferentes_nao_se_sobrepoe(tmp_path: Path) -> None:
+    """Versoes antigas do fetcher davam o nome nu a recursos diferentes; cada
+    recurso (URL do manifesto) e um arquivo vigente, nao so o mais recente."""
+    raw_dir = _raw(tmp_path, "rodovias")
+    _raw_com_manifesto(
+        raw_dir, "acidentes-rodovias@20251128.csv", _RID_A, "eco101.csv",
+        "01/01/2024;1\n01/02/2024;2\n",
+    )  # fmt: skip
+    _raw_com_manifesto(
+        raw_dir, "acidentes-rodovias@20260628.csv", _RID_B, "viamineira.csv",
+        "01/01/2025;3\n",
+    )  # fmt: skip
+    plan = {p.path.name: p for p in converter.inventory(raw_dir.parent)}
+    assert {p.skip_reason for p in plan.values()} == {None}
+    res = converter.convert(raw_dir.parent, tmp_path / "lake")
+    assert not res.errors, res.errors
+    ds = tmp_path / "lake" / "antt" / "acidentes-rodovias"
+    assert _partitions(ds) == {"ano=2024": 2, "ano=2025": 1}
+    assert not check_dataset(ds)
+
+
+def test_versoes_do_mesmo_recurso_se_substituem(tmp_path: Path) -> None:
+    raw_dir = _raw(tmp_path, "rodovias")
+    _raw_com_manifesto(
+        raw_dir, "acidentes-rodovias@20251128.csv", _RID_A, "eco101.csv",
+        "01/01/2024;1\n",
+    )  # fmt: skip
+    _raw_com_manifesto(
+        raw_dir, "acidentes-rodovias@20260628.csv", _RID_A, "eco101.csv",
+        "01/01/2024;1\n01/02/2024;2\n",
+    )  # fmt: skip
+    plan = {p.path.name: p for p in converter.inventory(raw_dir.parent)}
+    assert plan["acidentes-rodovias@20251128.csv"].skip_reason == "superado"
+    assert plan["acidentes-rodovias@20260628.csv"].skip_reason is None
+    converter.convert(raw_dir.parent, tmp_path / "lake")
+    ds = tmp_path / "lake" / "antt" / "acidentes-rodovias"
+    assert _partitions(ds) == {"ano=2024": 2}
+
+
+def test_chave_do_parquet_vem_do_recurso_e_a_reconversao_e_idempotente(
+    tmp_path: Path,
+) -> None:
+    raw_dir = _raw(tmp_path, "rodovias")
+    _raw_com_manifesto(
+        raw_dir, "acidentes-rodovias@20251128.csv", _RID_A, "eco101.csv",
+        "01/01/2024;1\n",
+    )  # fmt: skip
+    _raw_com_manifesto(
+        raw_dir, "acidentes-rodovias@20260628.csv", _RID_B, "viamineira.csv",
+        "01/01/2024;2\n",
+    )  # fmt: skip
+    converter.convert(raw_dir.parent, tmp_path / "lake")
+    ds = tmp_path / "lake" / "antt" / "acidentes-rodovias"
+    assert _parquets(ds) == [
+        "acidentes-rodovias_aaaa1111.parquet",
+        "acidentes-rodovias_bbbb2222.parquet",
+    ]
+    again = converter.convert(raw_dir.parent, tmp_path / "lake")
+    assert again.converted == 0 and again.skipped == 2
+    # A versao nova do mesmo recurso reaproveita a chave (sem Parquet orfao).
+    _raw_com_manifesto(
+        raw_dir, "acidentes-rodovias@20260928.csv", _RID_A, "eco101.csv",
+        "01/01/2024;1\n01/03/2024;5\n",
+    )  # fmt: skip
+    converter.convert(raw_dir.parent, tmp_path / "lake")
+    assert _parquets(ds) == [
+        "acidentes-rodovias_aaaa1111.parquet",
+        "acidentes-rodovias_bbbb2222.parquet",
+    ]
+    assert _partitions(ds) == {"ano=2024": 3}
+
+
+def test_mesmo_recurso_sob_dois_nomes_entra_uma_vez(tmp_path: Path) -> None:
+    """O nome nu e o nome com chave de recurso, com o mesmo URL e hash, sao o
+    mesmo conteudo: nunca entram os dois, e a chave e a do nome com chave."""
+    raw_dir = _raw(tmp_path, "rodovias")
+    linhas = "01/01/2024;1\n01/02/2024;2\n"
+    _raw_com_manifesto(
+        raw_dir, "quantidade-possiveis-infratores@20260828.csv", _RID_A, "af.csv",
+        linhas, sha="ab" * 32,
+    )  # fmt: skip
+    _raw_com_manifesto(
+        raw_dir,
+        "quantidade-possiveis-infratores_quantidade-de-possiveis-aaaa1111@20260828.csv",
+        _RID_A, "af.csv", linhas, sha="ab" * 32,
+    )  # fmt: skip
+    plan = {p.path.name: p for p in converter.inventory(raw_dir.parent)}
+    assert plan["quantidade-possiveis-infratores@20260828.csv"].skip_reason == "gemeo"
+    assert sum(p.skip_reason is None for p in plan.values()) == 1
+    res = converter.convert(raw_dir.parent, tmp_path / "lake")
+    assert not res.errors, res.errors
+    ds = tmp_path / "lake" / "antt" / "quantidade-possiveis-infratores"
+    assert _partitions(ds) == {"ano=2024": 2}
+    assert _parquets(ds) == [
+        "quantidade-possiveis-infratores_quantidade-de-possiveis-aaaa1111.parquet"
+    ]
+
+
+def test_nome_nu_mais_novo_mantem_a_chave_do_nome_com_chave(tmp_path: Path) -> None:
+    """Se a versao mais nova do recurso tem o nome nu, a chave segue a do nome
+    com chave do mesmo recurso (nao troca de Parquet entre conversoes)."""
+    raw_dir = _raw(tmp_path, "rodovias")
+    _raw_com_manifesto(
+        raw_dir, "volume-radar_radar-x-aaaa1111@20260728.csv", _RID_A, "x.csv",
+        "01/01/2024;1\n",
+    )  # fmt: skip
+    converter.convert(raw_dir.parent, tmp_path / "lake")
+    _raw_com_manifesto(
+        raw_dir, "volume-radar@20260928.csv", _RID_A, "x.csv",
+        "01/01/2024;1\n01/02/2024;2\n",
+    )  # fmt: skip
+    converter.convert(raw_dir.parent, tmp_path / "lake")
+    ds = tmp_path / "lake" / "antt" / "volume-radar"
+    assert _parquets(ds) == ["volume-radar_radar-x-aaaa1111.parquet"]
+    assert _partitions(ds) == {"ano=2024": 2}
+
+
+def test_arquivos_sem_manifesto_seguem_a_regra_do_nome(tmp_path: Path) -> None:
+    raw_dir = _raw(tmp_path, "rodovias")
+    (raw_dir / "acidentes-rodovias@20251128.csv").write_text(
+        "data;km\n01/01/2024;1\n", encoding="utf-8"
+    )
+    (raw_dir / "acidentes-rodovias@20260628.csv").write_text(
+        "data;km\n01/01/2025;2\n", encoding="utf-8"
+    )
+    plan = {p.path.name: p for p in converter.inventory(raw_dir.parent)}
+    assert plan["acidentes-rodovias@20251128.csv"].skip_reason == "superado"
+    converter.convert(raw_dir.parent, tmp_path / "lake")
+    ds = tmp_path / "lake" / "antt" / "acidentes-rodovias"
+    assert _parquets(ds) == ["acidentes-rodovias.parquet"]
+    assert _partitions(ds) == {"ano=2025": 1}
