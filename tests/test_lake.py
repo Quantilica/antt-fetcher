@@ -940,3 +940,77 @@ def test_nome_nu_que_repete_um_nome_com_chave_nao_derruba_o_nu_antigo(
         / "relatorio-acompanhamento-acidentes-ferroviarios-raaf"
     )
     assert _partitions(ds) == {"ano=2004": 1, "ano=2020": 2}
+
+
+# --- granularidade (arquivo diario x mensal consolidado) --------------------
+def _granularidades(ds: Path) -> dict[str, int]:
+    df = pl.concat([pl.read_parquet(f) for f in ds.rglob("*.parquet")], how="diagonal")
+    contagem = df.group_by("granularidade").agg(pl.len().alias("n"))
+    return {str(g): n for g, n in contagem.iter_rows()}
+
+
+def test_volume_sat_diario_e_mensal_se_distinguem_por_granularidade(
+    tmp_path: Path,
+) -> None:
+    """O arquivo diario e o mensal consolidado do mesmo periodo caem na mesma
+    particao `ano`; a coluna `granularidade` os separa (nao e preciso adivinhar
+    pelo formato da data)."""
+    raw_dir = _raw(tmp_path, "rodovias")
+    cab = "concessionaria;data_de_passagem;volume_total\n"
+    (
+        raw_dir / "volume-sat_trafego-de-veiculos-sat-flum-aaaa1111@20261103.csv"
+    ).write_text(cab + "X;26/02/2025;10\nX;27/02/2025;20\n", encoding="utf-8")
+    (
+        raw_dir / "volume-sat_trafego-de-veiculos-sat-flum-mensal-bbbb2222@20261103.csv"
+    ).write_text(cab + "X;02/2025;30\n", encoding="utf-8")
+    res = converter.convert(raw_dir.parent, tmp_path / "lake")
+    assert not res.errors, res.errors
+    ds = tmp_path / "lake" / "antt" / "volume-sat"
+    assert _partitions(ds) == {"ano=2025": 3}
+    assert _granularidades(ds) == {"dia": 2, "mes": 1}
+    total_dia = (
+        pl.concat([pl.read_parquet(f) for f in ds.rglob("*.parquet")], how="diagonal")
+        .filter(pl.col("granularidade") == "dia")["volume_total"]
+        .cast(pl.Int64)
+        .sum()
+    )
+    assert total_dia == 30  # igual ao total do mensal: um so deles conta o trafego
+
+
+def test_volume_sat_json_e_dia(tmp_path: Path) -> None:
+    raw_dir = _raw(tmp_path, "rodovias")
+    shutil.copy(_FIXTURES / "volume-sat.json", raw_dir / "volume-sat@20261103.json")
+    converter.convert(raw_dir.parent, tmp_path / "lake")
+    assert _granularidades(tmp_path / "lake" / "antt" / "volume-sat") == {"dia": 5}
+
+
+def test_volume_radar_e_praca_de_pedagio_tem_granularidade(tmp_path: Path) -> None:
+    raw_dir = _raw(tmp_path, "rodovias")
+    (raw_dir / "volume-radar@20260928.csv").write_text(
+        "concessionaria;data_da_passagem;volume_total\n"
+        "A;16/01/2026;1\nA;01/2026;2\nA;sem data;3\n",
+        encoding="utf-8",
+    )
+    (raw_dir / "volume-trafego-praca-pedagio@20260930.csv").write_text(
+        "concessionaria;mes_ano;volume_total\nA;01/2026;1\nA;01/01/2026;2\n",
+        encoding="utf-8",
+    )
+    res = converter.convert(raw_dir.parent, tmp_path / "lake")
+    assert not res.errors, res.errors
+    lake = tmp_path / "lake" / "antt"
+    gran = _granularidades(lake / "volume-radar")
+    assert gran["dia"] == 1 and gran["mes"] == 1 and gran["None"] == 1
+    assert _granularidades(lake / "volume-trafego-praca-pedagio") == {
+        "dia": 1,
+        "mes": 1,
+    }
+
+
+def test_outros_conjuntos_nao_ganham_granularidade(tmp_path: Path) -> None:
+    raw_dir = _raw(tmp_path, "rodovias")
+    (raw_dir / "acidentes-rodovias@20260928.csv").write_text(
+        "data;km\n01/01/2024;1\n", encoding="utf-8"
+    )
+    converter.convert(raw_dir.parent, tmp_path / "lake")
+    f = next((tmp_path / "lake" / "antt" / "acidentes-rodovias").rglob("*.parquet"))
+    assert "granularidade" not in pl.read_parquet(f).columns

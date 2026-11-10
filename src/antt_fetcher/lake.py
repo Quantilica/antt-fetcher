@@ -354,6 +354,16 @@ PACKAGE_DATASETS: dict[str, str] = {
     ),
 }
 
+# Conjuntos que publicam o mesmo trafego em arquivos diarios e em arquivos mensais
+# consolidados (por concessionaria e ano). Os dois caem na mesma particao ``ano``
+# e somar tudo conta o trafego duas vezes; a coluna ``granularidade`` (``dia`` ou
+# ``mes``, lida do formato da data de cada linha) separa os dois.
+GRANULARITY_DATASETS = frozenset(
+    {"volume-trafego-praca-pedagio", "volume-radar", "volume-sat"}
+)
+_MONTH_VALUE = r"^\s*(?:\d{1,2}/\d{4}|\d{4}-\d{1,2})\s*$"
+_DAY_VALUE = r"^\s*(?:\d{1,2}/\d{1,2}/\d{4}|\d{4}-\d{1,2}-\d{1,2})(?:\D.*)?$"
+
 _KNOWN_SLUGS = frozenset(DATASETS) | frozenset(CATALOG)
 _KNOWN_SLUGS_BY_LENGTH = sorted(_KNOWN_SLUGS, key=len, reverse=True)
 
@@ -631,6 +641,20 @@ def _digest(raw_file: Path) -> str:
     )
 
 
+def _granularity(date_column: str | None) -> pl.Expr:
+    """``dia`` (``dd/mm/aaaa``, ``aaaa-mm-dd``) ou ``mes`` (``mm/aaaa``) pelo formato
+    da data da linha; nulo se a data nao tem nenhum dos dois formatos."""
+    if date_column is None:
+        return pl.lit(None, dtype=pl.String)
+    value = pl.col(date_column)
+    return (
+        pl.when(value.str.contains(_DAY_VALUE))
+        .then(pl.lit("dia"))
+        .when(value.str.contains(_MONTH_VALUE))
+        .then(pl.lit("mes"))
+    )
+
+
 class AnttLakeConverter:
     """Universal Hive Parquet Lake converter for ANTT datasets."""
 
@@ -876,6 +900,8 @@ class AnttLakeConverter:
                 )
             ano = pl.lit(declared, dtype=pl.Int32)
         lf = lf.with_columns(ano.cast(pl.Int32).alias("ano"))
+        if ds_id in GRANULARITY_DATASETS:
+            lf = lf.with_columns(_granularity(source).alias("granularidade"))
 
         anos = lf.select("ano").unique().collect()["ano"].to_list()
         for year in sorted(anos, key=lambda y: (y is None, y)):
