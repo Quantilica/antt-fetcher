@@ -1351,3 +1351,65 @@ def test_mes_em_python_e_em_polars_concordam() -> None:
     em_polars = df.select(_month_expr("d").alias("m"))["m"].to_list()
     assert em_polars == [_month_of(v) for v in valores]
     assert _month_of("25/03/2025") == "2025-03" and _month_of("13/2025") is None
+
+
+# --- robustez: falha de leitura nao derruba convert nem inventory -------------
+def test_json_sem_chave_de_concessionaria_nao_e_gemeo(tmp_path: Path) -> None:
+    raw_dir = _raw(tmp_path, "rodovias")
+    (raw_dir / "volume-sat_trafego-elovias-aaaa1111@20261104.csv").write_text(
+        _SAT_CAB + "ELOVIAS;30/10/2025;7\n", encoding="utf-8"
+    )
+    (raw_dir / "volume-sat@20261103.json").write_text(
+        '{"volume_sat":[{"data_de_passagem":"2025-10-30","volume_total":7},\n'
+        '{"concessionaria":"ELOVIAS","data_de_passagem":"2025-10-30","volume_total":7}]}\n',
+        encoding="utf-8",
+    )
+    plan = {p.path.name: p for p in converter.inventory(raw_dir.parent)}
+    assert plan["volume-sat@20261103.json"].skip_reason is None
+    res = converter.convert(raw_dir.parent, tmp_path / "lake")
+    assert not res.errors, res.errors
+    ds = tmp_path / "lake" / "antt" / "volume-sat"
+    assert sum(_partitions(ds).values()) == 2  # nada do JSON foi dado como coberto
+
+
+def test_cobertura_ilegivel_vai_para_errors_e_inventory_segue(
+    tmp_path: Path, monkeypatch
+) -> None:
+    import antt_fetcher.lake as lake
+
+    raw_dir = _raw(tmp_path, "rodovias")
+    (raw_dir / "volume-sat_trafego-elovias-aaaa1111@20261104.csv").write_text(
+        _SAT_CAB + "ELOVIAS;30/10/2025;7\n", encoding="utf-8"
+    )
+    (raw_dir / "volume-sat@20261103.json").write_text(
+        _sat_json(("ELOVIAS", [("2025-10-30", 7)])), encoding="utf-8"
+    )
+
+    def falha(_path, _ds):
+        raise ValueError("csv ilegivel")
+
+    monkeypatch.setattr(lake, "_csv_pairs", falha)
+    plan = {p.path.name: p for p in converter.inventory(raw_dir.parent)}
+    assert plan["volume-sat@20261103.json"].skip_reason is None
+    res = converter.convert(raw_dir.parent, tmp_path / "lake")
+    assert len(res.errors) == 1 and "volume-sat@20261103.json" in res.errors[0]
+    # O CSV continua sendo convertido.
+    assert sum(_partitions(tmp_path / "lake" / "antt" / "volume-sat").values()) == 1
+
+
+def test_hash_ilegivel_nao_derruba_a_selecao(tmp_path: Path, monkeypatch) -> None:
+    import antt_fetcher.lake as lake
+
+    raw_dir = _raw(tmp_path, "rodovias")
+    for nome in (
+        "volume-sat@20261103.csv",
+        "volume-sat_trafego-via040-aaaa1111@20261103.csv",
+    ):
+        (raw_dir / nome).write_text(_SAT_CAB + "VIA 040;05/01/2024;2\n", "utf-8")
+
+    def falha(_path):
+        raise OSError("sem permissao")
+
+    monkeypatch.setattr(lake, "sha256_file", falha)
+    plan = converter.inventory(raw_dir.parent)
+    assert all(p.skip_reason is None for p in plan)  # sem hash, nao ha gemeo

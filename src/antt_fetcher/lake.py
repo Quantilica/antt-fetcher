@@ -22,6 +22,7 @@ from urllib.parse import urlsplit
 try:
     import polars as pl
     from quantilica.analytics.lake import ConvertResult, LakeWriter
+    from quantilica.core.exceptions import StorageError
     from quantilica.core.files import sha256_file
     from quantilica.core.lake import (
         DatasetDescriptor,
@@ -781,8 +782,11 @@ def _same_content_twins(files: Sequence[Path]) -> set[Path]:
         keyed = [f for f in group if f not in nus]
         if not nus or not keyed:
             continue
-        digests = {_digest(f) for f in keyed}
-        twins.update(f for f in nus if _digest(f) in digests)
+        try:
+            digests = {_digest(f) for f in keyed}
+            twins.update(f for f in nus if _digest(f) in digests)
+        except (OSError, StorageError) as exc:  # arquivo ilegivel: nao e gemeo
+            logger.warning("ANTT %s: hash ilegivel (%s); sem comparar", group[0], exc)
     return twins
 
 
