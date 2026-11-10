@@ -85,13 +85,13 @@ Descrições do dicionário de dados da ANTT ("Dicionário de Dados - Tráfego d
 | `faixa_de_velocidade` | `faixa_de_velocidade` | texto | Faixa de velocidade do veículo, em km/h. O dicionário a chama `Velocidade` e dá o exemplo `80km/h`; os arquivos trazem faixas (`21 - 50 KM/h`, `> 160 KM/h`) | faixas em km/h | todo |
 | `tipo_de_veiculo` | `tipo_de_veiculo` | texto | Tipo de veículo | `Moto`, `Veículo leve`, `Veículo pesado`, `Não identificado` (varia entre arquivos: `Passeio`, `Comercial`, `Ônibus`…) | todo |
 | `volume_total` | `volume_total` | texto | Total de veículos (volume de passagem) | veículos | todo |
-| `granularidade` | — | texto | Granularidade da linha, calculada pelo conversor a partir do formato de `data_de_passagem`; não existe na fonte | `dia` (`dd/mm/aaaa` ou `aaaa-mm-dd`), `mes` (`mm/aaaa`) ou nulo | todo |
+| `granularidade` | — | texto | Granularidade do arquivo de origem, calculada pelo conversor; não existe na fonte | `dia`, `mes` ou nulo (arquivo sem data) | todo |
 
 ## No lake
 
 - Dataset `antt/volume-sat`, particionado por `ano`, um Parquet por arquivo e ano.
 - `ano` vem de `data_de_passagem` (`dd/mm/aaaa`, `mm/aaaa` ou `aaaa-mm-dd`).
-- `granularidade` (`dia` ou `mes`) é calculada de cada linha pelo formato de `data_de_passagem`: o arquivo diário e o mensal consolidado do mesmo período caem na mesma partição `ano`, e a coluna os separa.
+- `granularidade` (`dia` ou `mes`) é do arquivo, igual em todas as linhas dele: o arquivo diário e o mensal consolidado do mesmo período caem na mesma partição `ano`, e a coluna os separa. Vale o que o nome do recurso diz (`_mensal_consolidado`); sem isso, o arquivo é `mes` quando pelo menos 90% das linhas têm `mm/aaaa` ou o dia 01, e `dia` no resto.
 - O JSON é lido por streaming linha a linha e convertido para texto (`101.42`, `2`), menos as concessionárias que já têm CSV diário. Linha fora do formato de um registro por linha é erro.
 - Esquema de referência (`volume-sat.schema.json`): 16 colunas, gerado da conversão de 5 CSV de amostra (diário e mensal consolidado) e dos primeiros 3 MB do JSON.
 

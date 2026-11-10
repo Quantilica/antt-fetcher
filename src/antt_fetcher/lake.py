@@ -358,12 +358,19 @@ PACKAGE_DATASETS: dict[str, str] = {
 # Conjuntos que publicam o mesmo trafego em arquivos diarios e em arquivos mensais
 # consolidados (por concessionaria e ano). Os dois caem na mesma particao ``ano``
 # e somar tudo conta o trafego duas vezes; a coluna ``granularidade`` (``dia`` ou
-# ``mes``, lida do formato da data de cada linha) separa os dois.
+# ``mes``) separa os dois. A granularidade e do ARQUIVO, nao da linha: os arquivos
+# mensais antigos das pracas (2010 a 2023) trazem o mes como ``01/MM/AAAA`` e o de
+# 2023 tem poucas linhas em outros dias, e nem por isso sao diarios. Vale o que o
+# nome do recurso diz (``_diario``, ``_mensal_consolidado``); sem isso, o arquivo e
+# mensal quando pelo menos ``MONTHLY_SHARE`` das linhas tem data de mes (``mm/aaaa``)
+# ou dia 01, e diario no resto.
 GRANULARITY_DATASETS = frozenset(
     {"volume-trafego-praca-pedagio", "volume-radar", "volume-sat"}
 )
+MONTHLY_SHARE = 0.9
 _MONTH_VALUE = r"^\s*(?:\d{1,2}/\d{4}|\d{4}-\d{1,2})\s*$"
 _DAY_VALUE = r"^\s*(?:\d{1,2}/\d{1,2}/\d{4}|\d{4}-\d{1,2}-\d{1,2})(?:\D.*)?$"
+_FIRST_OF_MONTH = r"^\s*(?:0?1/\d{1,2}/\d{4}|\d{4}-\d{1,2}-0?1)(?:\D.*)?$"
 
 _KNOWN_SLUGS = frozenset(DATASETS) | frozenset(CATALOG)
 _KNOWN_SLUGS_BY_LENGTH = sorted(_KNOWN_SLUGS, key=len, reverse=True)
@@ -708,18 +715,41 @@ def _digest(raw_file: Path) -> str:
     )
 
 
-def _granularity(date_column: str | None) -> pl.Expr:
-    """``dia`` (``dd/mm/aaaa``, ``aaaa-mm-dd``) ou ``mes`` (``mm/aaaa``) pelo formato
-    da data da linha; nulo se a data nao tem nenhum dos dois formatos."""
+def _granularity_hint(*names: str) -> str | None:
+    """``mes`` ou ``dia`` pelo nome do recurso (URL do manifesto, nome local):
+    ``mensal`` / ``diario``; ``None`` se nenhum ou se os dois aparecem."""
+    found: set[str] = set()
+    for name in names:
+        text = unicodedata.normalize("NFKD", name.lower())
+        text = text.encode("ascii", "ignore").decode("ascii")
+        if "mensal" in text:
+            found.add("mes")
+        if "diario" in text:
+            found.add("dia")
+        if found:
+            break
+    return found.pop() if len(found) == 1 else None
+
+
+def _file_granularity(
+    lf: pl.LazyFrame, date_column: str | None, *hints: str
+) -> str | None:
+    """Granularidade do arquivo: ``mes``, ``dia`` ou ``None`` (sem coluna de data).
+
+    O nome do recurso manda; sem ele, ``mes`` se ao menos ``MONTHLY_SHARE`` das
+    linhas tem data de mes (``mm/aaaa``) ou dia 01, ``dia`` no resto. Uma leitura
+    de uma coluna so, em streaming.
+    """
     if date_column is None:
-        return pl.lit(None, dtype=pl.String)
+        return None
+    if (hint := _granularity_hint(*hints)) is not None:
+        return hint
     value = pl.col(date_column)
-    return (
-        pl.when(value.str.contains(_DAY_VALUE))
-        .then(pl.lit("dia"))
-        .when(value.str.contains(_MONTH_VALUE))
-        .then(pl.lit("mes"))
-    )
+    monthly = value.str.contains(_MONTH_VALUE) | value.str.contains(_FIRST_OF_MONTH)
+    total, month_like = lf.select(pl.len(), monthly.sum().fill_null(0)).collect().row(0)
+    if total == 0:
+        return None
+    return "mes" if month_like / total >= MONTHLY_SHARE else "dia"
 
 
 class AnttLakeConverter:
@@ -984,7 +1014,12 @@ class AnttLakeConverter:
             ano = pl.lit(declared, dtype=pl.Int32)
         lf = lf.with_columns(ano.cast(pl.Int32).alias("ano"))
         if ds_id in GRANULARITY_DATASETS:
-            lf = lf.with_columns(_granularity(source).alias("granularidade"))
+            granularity = _file_granularity(
+                lf, source, _source_url_name(raw_file), raw_file.name
+            )
+            lf = lf.with_columns(
+                pl.lit(granularity, dtype=pl.String).alias("granularidade")
+            )
 
         anos = lf.select("ano").unique().collect()["ano"].to_list()
         for year in sorted(anos, key=lambda y: (y is None, y)):

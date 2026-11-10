@@ -1068,26 +1068,88 @@ def test_volume_sat_json_e_dia(tmp_path: Path) -> None:
     assert _granularidades(tmp_path / "lake" / "antt" / "volume-sat") == {"dia": 5}
 
 
-def test_volume_radar_e_praca_de_pedagio_tem_granularidade(tmp_path: Path) -> None:
+def _praca(raw_dir: Path, name: str, datas: list[str], url: str | None = None) -> Path:
+    raw = raw_dir / name
+    raw.write_text(
+        "concessionaria;mes_ano;volume_total\n" + "".join(f"A;{d};1\n" for d in datas),
+        encoding="utf-8",
+    )
+    if url:
+        _write_manifest(raw, url)
+    return raw
+
+
+def test_granularidade_e_do_arquivo_mensal_antigo_com_dia_01(tmp_path: Path) -> None:
+    """Praca 2010 a 2022: o mes vem como `01/MM/AAAA`. E mensal, nao diario."""
+    raw_dir = _raw(tmp_path, "rodovias")
+    _praca(
+        raw_dir,
+        "volume-trafego-praca-pedagio_volume-de-trafego-por-praca-aaaa1111@20241203.csv",
+        [f"01/{m:02d}/2010" for m in range(1, 13)],
+        "https://x/resource/aaaa1111-0000-4000-8000-000000000001/download/praca-2010.csv",
+    )
+    converter.convert(raw_dir.parent, tmp_path / "lake")
+    ds = tmp_path / "lake" / "antt" / "volume-trafego-praca-pedagio"
+    assert _granularidades(ds) == {"mes": 12}
+
+
+def test_granularidade_arquivo_mensal_com_poucas_datas_de_outro_dia(
+    tmp_path: Path,
+) -> None:
+    """Praca 2023: ~99,5% das linhas no dia 01 e umas poucas em 31/01, 02/12 e
+    dias de janeiro (a concessionaria mandou o mes com outra data, ou o diario de
+    um mes). O arquivo todo e mensal."""
+    raw_dir = _raw(tmp_path, "rodovias")
+    datas = [f"01/{m:02d}/2023" for m in range(1, 13)] * 20
+    datas += ["31/01/2023", "02/12/2023", "03/01/2023"]
+    _praca(raw_dir, "volume-trafego-praca-pedagio@20241203.csv", datas)
+    converter.convert(raw_dir.parent, tmp_path / "lake")
+    ds = tmp_path / "lake" / "antt" / "volume-trafego-praca-pedagio"
+    assert _granularidades(ds) == {"mes": 243}
+
+
+def test_granularidade_diaria_por_conteudo_e_por_nome(tmp_path: Path) -> None:
+    raw_dir = _raw(tmp_path, "rodovias")
+    # Sem pista no nome: datas de varios dias => diario, ainda que comece no dia 01.
+    _praca(
+        raw_dir,
+        "volume-trafego-praca-pedagio@20260930.csv",
+        ["01/01/2026", "02/01/2026", "03/01/2026", "04/01/2026"],
+    )
+    # O nome do recurso manda: `_diario` com todas as datas no dia 01 continua diario.
+    _praca(
+        raw_dir,
+        "volume-trafego-praca-pedagio_volume-de-trafego-bbbb2222@20260519.csv",
+        ["01/01/2025", "01/02/2025"],
+        "https://x/resource/bbbb2222-0000-4000-8000-000000000002/download/praca-2025_diario.csv",
+    )
+    # E `_mensal_consolidado` com `mm/aaaa`.
+    _praca(
+        raw_dir,
+        "volume-trafego-praca-pedagio_volume-de-trafego-cccc3333@20260519.csv",
+        ["01/2025", "02/2025"],
+        "https://x/resource/cccc3333-0000-4000-8000-000000000003/download/praca-2025_mensal_consolidado.csv",
+    )
+    converter.convert(raw_dir.parent, tmp_path / "lake")
+    ds = tmp_path / "lake" / "antt" / "volume-trafego-praca-pedagio"
+    assert _granularidades(ds) == {"dia": 6, "mes": 2}
+
+
+def test_volume_radar_granularidade_por_arquivo_e_sem_data(tmp_path: Path) -> None:
     raw_dir = _raw(tmp_path, "rodovias")
     (raw_dir / "volume-radar@20260928.csv").write_text(
         "concessionaria;data_da_passagem;volume_total\n"
-        "A;16/01/2026;1\nA;01/2026;2\nA;sem data;3\n",
+        "A;16/01/2026;1\nA;17/01/2026;2\nA;sem data;3\n",
         encoding="utf-8",
     )
-    (raw_dir / "volume-trafego-praca-pedagio@20260930.csv").write_text(
-        "concessionaria;mes_ano;volume_total\nA;01/2026;1\nA;01/01/2026;2\n",
+    (raw_dir / "volume-radar_radar-x-aaaa1111@20260728.csv").write_text(
+        "concessionaria;data_da_passagem;volume_total\nA;01/2026;1\nA;02/2026;2\n",
         encoding="utf-8",
     )
     res = converter.convert(raw_dir.parent, tmp_path / "lake")
     assert not res.errors, res.errors
-    lake = tmp_path / "lake" / "antt"
-    gran = _granularidades(lake / "volume-radar")
-    assert gran["dia"] == 1 and gran["mes"] == 1 and gran["None"] == 1
-    assert _granularidades(lake / "volume-trafego-praca-pedagio") == {
-        "dia": 1,
-        "mes": 1,
-    }
+    ds = tmp_path / "lake" / "antt" / "volume-radar"
+    assert _granularidades(ds) == {"dia": 3, "mes": 2}
 
 
 def test_outros_conjuntos_nao_ganham_granularidade(tmp_path: Path) -> None:

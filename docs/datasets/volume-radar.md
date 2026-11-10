@@ -85,13 +85,13 @@ Descrições do dicionário de dados da ANTT ("Dicionário de Dados - Tráfego d
 | `velocidade` | `velocidade` | texto | Velocidade do veículo em km/h. O dicionário dá o exemplo `80km/h`; os arquivos trazem faixas (`81 - 100 KM/h`, `> 160 KM/h`, `<= 20 KM/h`), não a velocidade medida | faixas em km/h | todo |
 | `tipo_de_veiculo` | `tipo_de_veiculo` | texto | Tipo de veículo | `Moto`, `Veículo leve`, `Veículo pesado`, `Não identificado` (varia entre arquivos: `Passeio`, `Comercial`, `Ônibus`…) | todo |
 | `volume_total` | `volume_total` | texto | Total de veículos (volume de passagem) | veículos | todo |
-| `granularidade` | — | texto | Granularidade da linha, calculada pelo conversor a partir do formato da data (`data_da_passagem`); não existe na fonte | `dia` (`dd/mm/aaaa`), `mes` (`mm/aaaa`) ou nulo | todo |
+| `granularidade` | — | texto | Granularidade do arquivo de origem, calculada pelo conversor; não existe na fonte | `dia`, `mes` ou nulo (arquivo sem data) | todo |
 
 ## No lake
 
 - Dataset `antt/volume-radar`, particionado por `ano`, um Parquet por arquivo.
 - `ano` vem de `data_da_passagem` (`dd/mm/aaaa` ou `mm/aaaa`).
-- `granularidade` (`dia` ou `mes`) é calculada de cada linha pelo formato da data: o arquivo diário e o mensal consolidado do mesmo período caem na mesma partição `ano`, e a coluna os separa.
+- `granularidade` (`dia` ou `mes`) é do arquivo, igual em todas as linhas dele: o arquivo diário e o mensal consolidado do mesmo período caem na mesma partição `ano`, e a coluna os separa. Vale o que o nome do recurso diz (`_mensal_consolidado`); sem isso, o arquivo é `mes` quando pelo menos 90% das linhas têm `mm/aaaa` ou o dia 01, e `dia` no resto.
 - Arquivo sem cabeçalho: a primeira linha com 15 campos que não é o cabeçalho recebe os nomes do dicionário, na ordem. Se a ordem real das colunas diferisse, as colunas ficariam trocadas; nos 5 arquivos abertos a ordem coincide com a do dicionário.
 - Todas as colunas são texto.
 - Esquema de referência (`volume-radar.schema.json`): 16 colunas, gerado de 6 arquivos de amostra (diários e mensais consolidados, com e sem cabeçalho).
@@ -101,7 +101,7 @@ Descrições do dicionário de dados da ANTT ("Dicionário de Dados - Tráfego d
 - **Dupla contagem entre arquivos diário e mensal.** O pacote traz, por concessionária, um arquivo diário (`volume-radar-<c>.csv`) e um mensal consolidado (`volume-radar-<c>_mensal_consolidado.csv`) para quase todas; os dois estão vigentes no bruto e caem na mesma partição `ano`. Conferido (2026-11-10) na CRT e na Via040: o total mensal de `volume_total` é idêntico nos dois arquivos (7.297.396 e 558.649 veículos). **Filtre `granularidade = "dia"` (ou `"mes"`) antes de somar**, senão o tráfego é contado duas vezes.
 - **Recursos de nome nu se somam aos demais.** O bruto tem arquivos de nome nu (`volume-radar@AAAAMMDD.csv`), gravados por versões antigas do fetcher que davam o mesmo nome a recursos diferentes do pacote (MS Via, Autopista Fluminense mensal, Ecoponte, Eco101 e outros). A versão vigente é escolhida por recurso (URL do manifesto ao lado), então todos entram, cada um no seu Parquet (`volume-radar_<id8>.parquet` para os de nome nu). Um arquivo de nome nu sem manifesto ao lado segue a regra do nome (só o mais recente de cada nome).
 - **Manifestos sem arquivo.** Oito manifestos do pacote não têm o CSV no bruto conferido.
-- **Velocidade é faixa e data pode ser só mês** (`mm/aaaa`); é isso que `granularidade` registra.
+- **Velocidade é faixa e data pode ser só mês** (`mm/aaaa`) nos arquivos mensais consolidados; `granularidade` registra se o arquivo é diário ou mensal.
 - **Volume por linha é agregado** (até 892.624 veículos por linha nos mensais).
 
 ## Exemplos

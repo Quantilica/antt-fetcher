@@ -62,7 +62,7 @@ Volume de tráfego por praça de pedágio informado pelas concessionárias de ro
 
 - Unidade de análise: o volume de uma combinação concessionária, praça, sentido, tipo de cobrança, categoria e tipo de veículo em um mês (ou dia). Chave não verificada.
 - Cobertura anunciada pela fonte: 2010 em diante, cobertura temporal "Anual" e atualização "Mensal". O que veio: 2010 a 2026 (até o mês do arquivo `@20260930`), com 2023 inclusive.
-- Eras: de 2010 a 2022 a categoria vem em `categoria`; de 2024 em diante em `categoria_eixo` (código numérico). O dicionário anterior a 2023 usa `categoria`; o de 2023 usa `categoria_eixo` e `Tipo de Cobrança`. A `mes_ano` varia de formato conforme o arquivo (dia ou mês).
+- Eras: de 2010 a 2022 a categoria vem em `categoria`; de 2024 em diante em `categoria_eixo` (código numérico). O dicionário anterior a 2023 usa `categoria`; o de 2023 usa `categoria_eixo` e `Tipo de Cobrança`. A `mes_ano` varia de formato conforme o arquivo: `01/MM/AAAA` (dia 01) nos mensais de 2010 a 2023, `dd/mm/aaaa` nos diários e `mm/aaaa` nos mensais consolidados de 2024 em diante.
 - Nulos (amostra de 5 arquivos, 429.634 linhas: 2010, 2020, 2021, 2024 mensal e o arquivo de nome nu de 2026, medida antes da coluna `granularidade`): `categoria` é nula em 60,2% (as linhas dos arquivos de 2024 e 2026) e `categoria_eixo` em 39,8% (as dos arquivos até 2021), porque cada era usa uma das duas colunas. Os demais campos não têm nulo na amostra.
 
 ## Variáveis
@@ -72,21 +72,21 @@ Descrições do dicionário de dados da ANTT (dois PDFs, o de 2010 a 2022 e o de
 | Coluna no lake | Na fonte | Tipo | Descrição | Unidade / códigos | Período |
 |---|---|---|---|---|---|
 | `concessionaria` | `concessionaria` | texto | Nome da concessionária que prestou as informações | — | todo |
-| `mes_ano` | `mes_ano` | texto | Data de referência. A fonte dá o formato `jan-17`; nos arquivos conferidos vem como `01/01/2010` (dia) nos arquivos diários e `01/2024` (mês) nos mensais consolidados | `dd/mm/aaaa` ou `mm/aaaa` | todo |
+| `mes_ano` | `mes_ano` | texto | Data de referência. A fonte dá o formato `jan-17`; nos arquivos conferidos vem como `01/MM/AAAA` (sempre o dia 01) nos mensais de 2010 a 2023, como `dd/mm/aaaa` nos arquivos diários e como `mm/aaaa` nos mensais consolidados de 2024 em diante | `dd/mm/aaaa` ou `mm/aaaa` | todo |
 | `sentido` | `sentido` | texto | Orientação de direção geral da praça | `Crescente`, `Decrescente` | todo |
 | `praca` | `praca` | texto | Nome dado para a praça de pedágio; o formato é livre (por exemplo `2 (Vargem)`, `1 Sul (Mairiporã)`) | — | todo |
 | `tipo_cobranca` | `tipo_cobranca` | texto | Tipo de cobrança. O dicionário de 2023 a chama `Tipo de Cobrança` | `Manual`, `Automática`, `OCR/PLACA`, `N/I` (conferido) | todo |
 | `categoria` | `categoria` | texto | Representação veicular na tabela de tarifas (dicionário anterior a 2023). Valores livres, como `Categoria 6` ou `Veículo Comercial 3 eixos` | — | 2010 a 2022 |
 | `tipo_de_veiculo` | `tipo_de_veiculo` | texto | Classificação veicular | `Comercial`, `Passeio`, `Moto`, `Veículo Pequeno` (conferido) | todo |
 | `volume_total` | `volume_total` | texto | Volume total de veículos que passaram na praça. Texto com vírgula decimal e `,00` (por exemplo `13,00`) | veículos | todo |
-| `granularidade` | — | texto | Granularidade da linha, calculada pelo conversor a partir do formato de `mes_ano`; não existe na fonte | `dia` (`dd/mm/aaaa`), `mes` (`mm/aaaa`) ou nulo | todo |
+| `granularidade` | — | texto | Granularidade do arquivo de origem, calculada pelo conversor; não existe na fonte | `dia`, `mes` ou nulo (arquivo sem data) | todo |
 | `categoria_eixo` | `categoria_eixo` | texto | Categoria por número de eixos ou da tabela de tarifas (dicionário de 2023, `categoria_eixo`); nos arquivos conferidos é um código numérico de 1 a 20 como texto | 1 a 20, como texto (conferido) | 2024 em diante |
 
 ## No lake
 
 - Dataset `antt/volume-trafego-praca-pedagio`, particionado por `ano`, um Parquet por arquivo de origem.
 - `ano` vem da coluna `mes_ano` (qualquer grupo de 4 dígitos na linha, entre 1900 e 2100); linha sem ano válido iria para a partição `ano=__HIVE_DEFAULT_PARTITION__` (não houve na amostra).
-- `granularidade` (`dia` ou `mes`) é calculada de cada linha pelo formato de `mes_ano`: o arquivo diário e o mensal consolidado do mesmo período caem na mesma partição `ano`, e a coluna os separa.
+- `granularidade` (`dia` ou `mes`) é do arquivo, igual em todas as linhas dele: o arquivo diário e o mensal consolidado do mesmo período caem na mesma partição `ano`, e a coluna os separa. Vale o que o nome do recurso diz (`_diario`, `_mensal_consolidado`); sem isso, o arquivo é `mes` quando pelo menos 90% das linhas têm `mm/aaaa` ou o dia 01, e `dia` no resto. Os mensais de 2010 a 2022 (`01/MM/AAAA`) saem `mes`. O de 2023 também (99,5% das linhas no dia 01), embora tenha 734 linhas em outras datas: `31/01` e `31/03/2023` (CRO, o mês inteiro com data do último dia), `02/12/2023` (CONCER, idem) e 226 linhas diárias de janeiro da Ecovias do Araguaia; essas linhas ficam `mes` como o resto do arquivo.
 - Todas as colunas são texto, com nomes normalizados (minúsculas, sem acento). Arquivos UTF-8 e Windows-1252 são lidos com decodificação própria; aspas internas soltas são reparadas.
 - Esquema de referência (`volume-trafego-praca-pedagio.schema.json`): 10 colunas, gerado de uma conversão de 6 arquivos de amostra (2010, 2020, 2021, 2024 mensal, o arquivo de nome nu de 2026 e o início do diário de 2026).
 
@@ -97,7 +97,7 @@ Descrições do dicionário de dados da ANTT (dois PDFs, o de 2010 a 2022 e o de
 - **Recursos de nome nu se somam aos demais.** O bruto tem arquivos de nome nu (`volume-trafego-praca-pedagio@AAAAMMDD.csv`), gravados por versões antigas do fetcher que davam o mesmo nome a recursos diferentes do pacote (2023, 2024 e o mensal de 2026, entre outros). A versão vigente é escolhida por recurso (URL do manifesto ao lado), então todos entram, cada um no seu Parquet (`volume-trafego-praca-pedagio_<id8>.parquet` para os de nome nu); o ano de 2023 passa a existir no lake. Um arquivo de nome nu sem manifesto ao lado segue a regra do nome (só o mais recente de cada nome).
 - **Manifesto sem arquivo.** Um manifesto de 2026 (`...concession-b475d3ac@20260930`) não tem o CSV correspondente no bruto conferido.
 - **Volume é texto com vírgula decimal** (`13,00`); troque a vírgula por ponto antes de somar.
-- **`mes_ano` muda de formato** entre arquivos diários (`dd/mm/aaaa`) e mensais (`mm/aaaa`); extraia o mês com cuidado.
+- **`mes_ano` muda de formato** entre os mensais de 2010 a 2023 (`01/MM/AAAA`), os diários (`dd/mm/aaaa`) e os mensais consolidados (`mm/aaaa`); extraia o mês com cuidado. No arquivo de 2023 algumas linhas têm outra data (ver `granularidade`): para o mês, use sempre a data inteira, não só a granularidade.
 - **Categorias.** Os valores de `categoria` e `categoria_eixo` são livres e variam entre concessionárias (`Categoria 6`, `Veículo Comercial 3 eixos`, `10`); não há tabela de códigos publicada.
 
 ## Exemplos
