@@ -97,14 +97,14 @@ Descrições do dicionário de dados da ANTT ("Dicionário de Dados - Acidentes"
 
 ## No lake
 
-- Dataset `antt/acidentes-rodovias`, particionado por `ano`, um Parquet por arquivo de origem (um por concessionária). O nome do Parquet de um arquivo de nome nu é `acidentes-rodovias_<id8>.parquet`, em que `<id8>` são os 8 primeiros caracteres do id do recurso na URL do manifesto; os de nome com chave mantêm a chave do nome.
+- Dataset `antt/acidentes-rodovias`, particionado por `ano`, um Parquet por arquivo de origem (um por concessionária). O nome do Parquet é `acidentes-rodovias_<id8>.parquet`, em que `<id8>` são os 8 primeiros caracteres do id do recurso na URL do manifesto (a chave vem do recurso, não do nome do arquivo).
 - `ano` vem de `data` (grupo de 4 dígitos). Data com ano de 2 dígitos (o dicionário fala em `DD/MM/AA`) não gera ano e a linha iria para a partição `__HIVE_DEFAULT_PARTITION__`; não houve nas amostras.
 - Todas as colunas são texto; arquivos com aspas internas soltas são reparados (`"barreira ou "submarino"`), com aviso no log.
 - Esquema de referência (`acidentes-rodovias.schema.json`): 24 colunas, gerado de 6 arquivos de amostra.
 
 ## Cuidados de uso
 
-- **Recursos de nome nu se somam aos demais.** O bruto tem arquivos de nome nu (`acidentes-rodovias@AAAAMMDD.csv`), gravados por versões antigas do fetcher que davam o mesmo nome a recursos diferentes do pacote (aqui, `@20251128` é o recurso `demostrativo_acidentes_eco101.csv`, 5,7 MB, e `@20260628` o `demostrativo_acidentes_viamineira.csv`). A versão vigente é escolhida por recurso (URL do manifesto ao lado), então os dois entram, cada um no seu Parquet (`acidentes-rodovias_<id8>.parquet` para os de nome nu). Um arquivo de nome nu sem manifesto ao lado segue a regra do nome (só o mais recente de cada nome); no bruto conferido, `acidentes-rodovias@20260928.csv` está nesse caso.
+- **Recursos de nome nu se somam aos demais.** O bruto tem arquivos de nome nu (`acidentes-rodovias@AAAAMMDD.csv`), gravados por versões antigas do fetcher que davam o mesmo nome a recursos diferentes do pacote (aqui, `@20251128` é o recurso `demostrativo_acidentes_eco101.csv`, 5,7 MB, e `@20260628` o `demostrativo_acidentes_viamineira.csv`). A versão vigente é escolhida por recurso (URL do manifesto ao lado), então os dois entram, cada um no seu Parquet (`acidentes-rodovias_<id8>.parquet`). Um arquivo de nome nu sem manifesto ao lado segue a regra do nome (só o mais recente de cada nome); no bruto conferido, `acidentes-rodovias@20260928.csv` está nesse caso.
 - **Manifestos sem arquivo.** Dois manifestos do pacote não têm o CSV correspondente no bruto conferido (Nova Rota do Oeste, entre outros).
 - **Valores livres entre concessionárias.** `tipo_de_ocorrencia`, `trecho`, `km` e `sentido` não seguem um padrão comum (códigos `AC03 - ...`, `N04`, `334,5`); normalize antes de agregar entre concessionárias.
 - **Dicionário diverge dos dados.** O dicionário diz `DD/MM/AA` para `data` e os arquivos trazem ano de 4 dígitos; `tipo_de_pista` existe nos arquivos e não no dicionário.

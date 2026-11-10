@@ -900,14 +900,33 @@ def test_mesmo_recurso_sob_dois_nomes_entra_uma_vez(tmp_path: Path) -> None:
     assert not res.errors, res.errors
     ds = tmp_path / "lake" / "antt" / "quantidade-possiveis-infratores"
     assert _partitions(ds) == {"ano=2024": 2}
-    assert _parquets(ds) == [
-        "quantidade-possiveis-infratores_quantidade-de-possiveis-aaaa1111.parquet"
-    ]
+    assert _parquets(ds) == ["quantidade-possiveis-infratores_aaaa1111.parquet"]
 
 
-def test_nome_nu_mais_novo_mantem_a_chave_do_nome_com_chave(tmp_path: Path) -> None:
-    """Se a versao mais nova do recurso tem o nome nu, a chave segue a do nome
-    com chave do mesmo recurso (nao troca de Parquet entre conversoes)."""
+def test_chave_do_parquet_nao_muda_quando_o_recurso_ganha_nome_com_chave(
+    tmp_path: Path,
+) -> None:
+    """Um recurso que so existia com nome nu e depois chega com nome com chave
+    continua no mesmo Parquet (a chave vem so do recurso, nao do nome)."""
+    raw_dir = _raw(tmp_path, "rodovias")
+    _raw_com_manifesto(
+        raw_dir, "acidentes-rodovias@20250101.csv", _RID_A, "way153.csv",
+        "01/01/2024;1\n",
+    )  # fmt: skip
+    converter.convert(raw_dir.parent, tmp_path / "lake")
+    ds = tmp_path / "lake" / "antt" / "acidentes-rodovias"
+    assert _parquets(ds) == ["acidentes-rodovias_aaaa1111.parquet"]
+    _raw_com_manifesto(
+        raw_dir, "acidentes-rodovias_way-153-aaaa1111@20250201.csv", _RID_A,
+        "way153.csv", "01/01/2024;1\n01/02/2024;2\n",
+    )  # fmt: skip
+    res = converter.convert(raw_dir.parent, tmp_path / "lake")
+    assert not res.errors, res.errors
+    assert _parquets(ds) == ["acidentes-rodovias_aaaa1111.parquet"]
+    assert _partitions(ds) == {"ano=2024": 2}  # sem linhas em dobro
+
+
+def test_nome_nu_mais_novo_mantem_a_chave_do_recurso(tmp_path: Path) -> None:
     raw_dir = _raw(tmp_path, "rodovias")
     _raw_com_manifesto(
         raw_dir, "volume-radar_radar-x-aaaa1111@20260728.csv", _RID_A, "x.csv",
@@ -920,8 +939,40 @@ def test_nome_nu_mais_novo_mantem_a_chave_do_nome_com_chave(tmp_path: Path) -> N
     )  # fmt: skip
     converter.convert(raw_dir.parent, tmp_path / "lake")
     ds = tmp_path / "lake" / "antt" / "volume-radar"
-    assert _parquets(ds) == ["volume-radar_radar-x-aaaa1111.parquet"]
+    assert _parquets(ds) == ["volume-radar_aaaa1111.parquet"]
     assert _partitions(ds) == {"ano=2024": 2}
+
+
+def test_colisao_de_id8_no_conjunto_e_erro_explicito(tmp_path: Path) -> None:
+    raw_dir = _raw(tmp_path, "rodovias")
+    _raw_com_manifesto(
+        raw_dir, "acidentes-rodovias@20250101.csv", _RID_A, "a.csv", "01/01/2024;1\n"
+    )
+    outro = "aaaa1111-ffff-4fff-8fff-ffffffffffff"  # mesmos 8 primeiros caracteres
+    _raw_com_manifesto(
+        raw_dir, "acidentes-rodovias_b-aaaa1111@20250201.csv", outro, "b.csv",
+        "01/01/2024;2\n",
+    )  # fmt: skip
+    res = converter.convert(raw_dir.parent, tmp_path / "lake")
+    assert len(res.errors) == 1 and "colisao" in res.errors[0]
+    assert not list((tmp_path / "lake").rglob("*.parquet"))
+
+
+def test_url_sem_id_de_recurso_e_normalizada_antes_do_hash(tmp_path: Path) -> None:
+    import json
+
+    raw_dir = _raw(tmp_path, "rodovias")
+    for nome, url in (
+        ("acidentes-rodovias@20250101.csv", "https://Dados.ANTT.gov.br/x/a.csv?v=1"),
+        ("acidentes-rodovias@20250201.csv", "https://dados.antt.gov.br/x/a.csv/"),
+    ):
+        (raw_dir / nome).write_text("data;km\n01/01/2024;1\n", encoding="utf-8")
+        Path(str(raw_dir / nome) + ".manifest.json").write_text(
+            json.dumps({"url": url}), encoding="utf-8"
+        )
+    plan = {p.path.name: p for p in converter.inventory(raw_dir.parent)}
+    assert plan["acidentes-rodovias@20250101.csv"].skip_reason == "superado"
+    assert plan["acidentes-rodovias@20250201.csv"].skip_reason is None
 
 
 def test_arquivos_sem_manifesto_seguem_a_regra_do_nome(tmp_path: Path) -> None:

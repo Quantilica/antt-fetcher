@@ -92,7 +92,7 @@ Descrições do dicionário de dados da ANTT ("Dicionário de Dados - Viagens do
 
 ## No lake
 
-- Dataset `antt/monitriip-servico-regular-paradas`, particionado por `ano`, um Parquet por arquivo (um por mês). O nome do Parquet de um arquivo de nome nu é `monitriip-servico-regular-paradas_<id8>.parquet`, em que `<id8>` são os 8 primeiros caracteres do id do recurso na URL do manifesto; os de nome com chave mantêm a chave do nome.
+- Dataset `antt/monitriip-servico-regular-paradas`, particionado por `ano`, um Parquet por arquivo (um por mês). O nome do Parquet é `monitriip-servico-regular-paradas_<id8>.parquet`, em que `<id8>` são os 8 primeiros caracteres do id do recurso na URL do manifesto (a chave vem do recurso, não do nome do arquivo).
 - `ano` vem de `data_parada` (grupo de 4 dígitos, aqui `dd-mm-aaaa hh:mm:ss`).
 - Todas as colunas são texto.
 - Esquema de referência (`monitriip-servico-regular-paradas.schema.json`): 14 colunas, gerado de 2 arquivos de amostra (abril e maio de 2020).

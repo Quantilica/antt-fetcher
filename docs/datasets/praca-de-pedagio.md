@@ -85,7 +85,7 @@ Descrições do dicionário de dados da ANTT ("Dicionário de Dados - Dados dos 
 
 ## No lake
 
-- Dataset `antt/praca-de-pedagio`, particionado por `ano`, um Parquet (`praca-de-pedagio_<id8>.parquet`, em que `<id8>` são os 8 primeiros caracteres do id do recurso na URL do manifesto, porque o arquivo tem nome nu).
+- Dataset `antt/praca-de-pedagio`, particionado por `ano`, um Parquet (`praca-de-pedagio_<id8>.parquet`, em que `<id8>` são os 8 primeiros caracteres do id do recurso na URL do manifesto).
 - Dataset de fotografia sem período no nome: o `ano` é o do carimbo `@AAAAMMDD` do nome do arquivo (2026), com aviso no log, e não descarta linhas. `ano_do_pnv_snv` não serve de partição.
 - Todas as colunas são texto.
 - Esquema de referência (`praca-de-pedagio.schema.json`): 13 colunas, gerado da conversão do arquivo inteiro.

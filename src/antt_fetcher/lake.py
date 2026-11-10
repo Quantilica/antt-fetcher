@@ -17,6 +17,7 @@ from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import IO
+from urllib.parse import urlsplit
 
 try:
     import polars as pl
@@ -610,24 +611,28 @@ def _read_manifest(raw_file: Path) -> dict[str, object]:
     return data if isinstance(data, dict) else {}
 
 
+def _normalize_url(url: str) -> str:
+    """URL sem consulta nem fragmento, com esquema e host em minusculas e sem a
+    barra final: ``HTTPS://Host/a/`` e ``https://host/a`` sao o mesmo recurso."""
+    parts = urlsplit(url.strip())
+    path = parts.path.rstrip("/")
+    return f"{parts.scheme.lower()}://{parts.netloc.lower()}{path}"
+
+
 def _resource_of(raw_file: Path) -> _Resource | None:
     """Recurso do arquivo (URL do manifesto ao lado); ``None`` sem URL."""
     data = _read_manifest(raw_file)
-    url = str(data.get("url") or "").split("?", 1)[0].strip()
-    if not url:
+    raw_url = str(data.get("url") or "").strip()
+    if not raw_url:
         return None
-    match = _RESOURCE_UUID.search(url)
+    match = _RESOURCE_UUID.search(raw_url)
     if match:
         ident = match[1].lower()
         id8 = ident[:8]
     else:
-        ident = url
-        id8 = hashlib.sha1(url.encode("utf-8")).hexdigest()[:8]  # noqa: S324
-    return _Resource(
-        ident,
-        id8,
-        str(data.get("fetched_at") or ""),
-    )
+        ident = _normalize_url(raw_url)
+        id8 = hashlib.sha1(ident.encode("utf-8")).hexdigest()[:8]  # noqa: S324
+    return _Resource(ident, id8, str(data.get("fetched_at") or ""))
 
 
 def _version_stamp(filename: str) -> str:
@@ -689,6 +694,7 @@ def _current_versions(files: Sequence[Path]) -> _Current:
 
     selected: dict[Path, str] = {}
     superseded: set[Path] = set()
+    key_owner: dict[str, str] = {}
     for f in select_current(by_name):
         selected[f] = _base_key(f)
     superseded.update(set(by_name) - set(selected))
@@ -703,13 +709,17 @@ def _current_versions(files: Sequence[Path]) -> _Current:
         current.sort(key=lambda fr: fr[1].fetched_at, reverse=True)
         current.sort(key=lambda fr: not _is_keyed(*fr))
         winner, resource = current[0]
-        keyed = sorted(
-            (f for f, r in versions if _is_keyed(f, r)),
-            key=lambda f: (_version_stamp(f.name), f.name),
-        )
-        selected[winner] = (
-            _base_key(keyed[-1]) if keyed else f"{_base_key(winner)}_{resource.id8}"
-        )
+        # A chave do Parquet vem so do recurso (``<slug>_<id8>``), nunca do nome
+        # do arquivo: o mesmo recurso que passa de nome nu a nome com chave (ou
+        # troca de nome na fonte) continua no mesmo Parquet.
+        key = f"{_slug_of(winner.name)}_{resource.id8}".lower()
+        owner = key_owner.setdefault(key, resource.ident)
+        if owner != resource.ident:
+            raise ValueError(
+                f"colisao de chave de Parquet {key!r}: os recursos {owner!r} e "
+                f"{resource.ident!r} do mesmo conjunto tem o mesmo id8"
+            )
+        selected[winner] = key
         twins.update(f for f, _ in current[1:])
     return _Current(selected, frozenset(twins), frozenset(superseded))
 
@@ -896,7 +906,11 @@ class AnttLakeConverter:
             and not f.name.endswith(".manifest.json")
             and not f.name.endswith(".tmp")
         ]
-        current = _current_versions(sorted(all_raw_files))
+        try:
+            current = _current_versions(sorted(all_raw_files))
+        except ValueError as exc:  # colisao de chave: nada e escrito
+            res.errors.append(f"ANTT: {exc}")
+            return res
 
         for raw_file in sorted(current.selected):
             try:

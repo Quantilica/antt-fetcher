@@ -81,7 +81,7 @@ Descrições do dicionário de dados da ANTT ("Dicionário de Dados - Ciot"). To
 
 ## No lake
 
-- Dataset `antt/ciot`, particionado por `ano`, um Parquet por arquivo (um por mês). O nome do Parquet de um arquivo de nome nu é `ciot_<id8>.parquet`, em que `<id8>` são os 8 primeiros caracteres do id do recurso na URL do manifesto; os de nome com chave mantêm a chave do nome. É um dataset de fotografia (`SNAPSHOT_DATASETS`): o `ano` vem do período no nome do arquivo ou da URL do manifesto (`01_2020_ciots.csv` dá 2020), sem coluna de data; sem período no nome e sem manifesto a conversão falha.
+- Dataset `antt/ciot`, particionado por `ano`, um Parquet por arquivo (um por mês). O nome do Parquet é `ciot_<id8>.parquet`, em que `<id8>` são os 8 primeiros caracteres do id do recurso na URL do manifesto (a chave vem do recurso, não do nome do arquivo). É um dataset de fotografia (`SNAPSHOT_DATASETS`): o `ano` vem do período no nome do arquivo ou da URL do manifesto (`01_2020_ciots.csv` dá 2020), sem coluna de data; sem período no nome e sem manifesto a conversão falha.
 - Todas as colunas são texto.
 - Esquema de referência (`ciot.schema.json`): 8 colunas, gerado de 4 arquivos de amostra (janeiro a maio de 2020); o cabeçalho dos 78 arquivos vigentes tem as mesmas 8.
 
