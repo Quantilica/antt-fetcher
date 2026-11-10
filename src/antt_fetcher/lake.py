@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import codecs
+import csv
 import hashlib
 import json
 import logging
@@ -430,10 +431,11 @@ _NON_TABULAR_SUFFIXES = frozenset(
      ".jpg", ".jpeg", ".gif", ".kml", ".kmz"}
 )  # fmt: skip
 # Conjuntos publicados tambem em JSON (``{"chave":[{...}, ...]}``, um registro por
-# linha, varios documentos por arquivo, um por concessionaria). O JSON junta
-# todas as concessionarias e repete a do CSV (ex.: Nova Rota do Oeste), entao,
-# com os dois no mesmo carimbo, o conversor le o JSON e o CSV e o ``gemeo``:
-# converter os dois duplicaria as passagens.
+# linha, varios documentos por arquivo, um por concessionaria). O JSON repete
+# concessionarias que tem CSV diario (conferido no ``volume-sat``: Nova Rota do
+# Oeste, Motiva Minas SP, EPR Via Mineira e Elovias, com as mesmas contagens de
+# registros) sob outro nome de recurso. O CSV manda: do JSON so entram as
+# concessionarias sem CSV diario vigente, para nao contar as passagens duas vezes.
 JSON_DATASETS: frozenset[str] = frozenset({"volume-sat"})
 
 
@@ -446,12 +448,77 @@ def _is_readable(raw_file: Path) -> bool:
     return suffix == ".json" and _slug_of(raw_file.name) in JSON_DATASETS
 
 
-def _json_twin(raw_file: Path) -> bool:
-    """O CSV tem um JSON da mesma publicacao (mesmo nome e carimbo) que o
-    conversor le no lugar dele?"""
+_SAMPLE_BYTES = 256 * 1024
+
+
+def _sample_rows(csv_path: Path) -> tuple[list[str], list[list[str]]]:
+    """Cabecalho (nomes normalizados) e linhas do inicio de um CSV, sem lê-lo
+    inteiro: ate ``_SAMPLE_BYTES``, sem a ultima linha se o corte a partiu."""
+    with open(csv_path, "rb") as fh:
+        data = fh.read(_SAMPLE_BYTES)
+        cut = bool(fh.read(1))
+    try:
+        text = codecs.getincrementaldecoder(_UTF8)().decode(data)
+    except UnicodeDecodeError:
+        text = data.decode(_LEGACY, errors="quantilica_c1")
+    lines = text.splitlines()
+    if cut and lines:
+        lines.pop()
+    if not lines:
+        return [], []
+    sep = ";" if ";" in lines[0] else ","
+    rows = list(csv.reader(lines, delimiter=sep))
+    return [_norm_col(c) for c in rows[0]], rows[1:]
+
+
+def _daily_concessionaires(csv_files: Sequence[Path], ds_id: str) -> frozenset[str]:
+    """Concessionarias (nome normalizado) com linhas diarias nos CSV, lidas do
+    inicio de cada arquivo (cada CSV do pacote e de uma concessionaria)."""
+    covered: set[str] = set()
+    for csv_file in csv_files:
+        try:
+            header, rows = _sample_rows(csv_file)
+        except OSError:
+            continue
+        date_col = next((c for c in YEAR_COLUMNS[ds_id] if c in header), None)
+        if "concessionaria" not in header or date_col is None:
+            continue
+        who, when = header.index("concessionaria"), header.index(date_col)
+        for row in rows:
+            if len(row) > max(who, when) and re.match(_DAY_VALUE, row[when]):
+                covered.add(_norm_col(row[who]))
+    return frozenset(covered)
+
+
+def _json_concessionaires(json_file: Path) -> frozenset[str]:
+    """Concessionarias (nome normalizado) do JSON, lidas linha a linha."""
+    pattern = re.compile(r'"concessionaria"\s*:\s*"((?:[^"\\]|\\.)*)"')
+    found: set[str] = set()
+    with open(json_file, encoding="utf-8-sig") as fh:
+        for line in fh:
+            for match in pattern.finditer(line):
+                found.add(_norm_col(json.loads(f'"{match[1]}"')))
+    return frozenset(found)
+
+
+def _covered_by_csv(selected: Sequence[Path], ds_id: str) -> frozenset[str]:
+    """Concessionarias que ja entram pelos CSV diarios vigentes de ``ds_id``."""
+    csv_files = [
+        f for f in selected if f.suffix.lower() == ".csv" and _slug_of(f.name) == ds_id
+    ]
+    return _daily_concessionaires(csv_files, ds_id)
+
+
+def _norm_expr(column: str) -> pl.Expr:
+    """``_norm_col`` como expressao do Polars (sem acento, minusculas, ``_``)."""
     return (
-        _slug_of(raw_file.name) in JSON_DATASETS
-        and raw_file.with_suffix(".json").is_file()
+        pl.col(column)
+        .cast(pl.String)
+        .str.to_lowercase()
+        .str.normalize("NFKD")
+        .str.replace_all(r"\p{M}+", "")
+        .str.replace_all(r"[^a-z0-9]+", "_")
+        .str.strip_chars("_")
     )
 
 
@@ -701,9 +768,11 @@ class AnttLakeConverter:
             if names is None and suffix in _NON_TABULAR_SUFFIXES:
                 plan.append(Planned(raw_file, skip_reason="nao_tabular"))
                 continue
-            if names is None and suffix == ".csv" and _json_twin(raw_file):
-                plan.append(Planned(raw_file, skip_reason="gemeo"))
-                continue
+            if names is None and suffix == ".json" and _is_readable(raw_file):
+                covered = _covered_by_csv(current.selected, _slug_of(raw_file.name))
+                if _json_concessionaires(raw_file) <= covered:
+                    plan.append(Planned(raw_file, skip_reason="gemeo"))
+                    continue
             labels: list[str | None] = [None] if names is None else list(names)
             ds_id = next(
                 (
@@ -770,8 +839,6 @@ class AnttLakeConverter:
             if names is None:  # arquivo solto, sem ZIP
                 if not _is_readable(raw_file):
                     continue
-                if raw_file.suffix.lower() == ".csv" and _json_twin(raw_file):
-                    continue  # gemeo: o conversor le o JSON
                 members: list[str | None] = [None]
             else:
                 members = list(names)
@@ -781,6 +848,11 @@ class AnttLakeConverter:
                 ds_id = _dataset_of(raw_file.name, label)
                 if not ds_id or ds_id not in writers:
                     continue
+                skip = (
+                    _covered_by_csv(current.selected, ds_id)
+                    if name is None and raw_file.suffix.lower() == ".json"
+                    else frozenset()
+                )
                 # Cada membro e uma origem propria no lake (chave composta
                 # zip+membro): o sha256 do ZIP e o mesmo para todos os membros.
                 key = composite_file_key(
@@ -796,6 +868,7 @@ class AnttLakeConverter:
                             csv_path,
                             label,
                             res,
+                            skip_concessionaires=skip,
                         )
                 except Exception as exc:
                     res.errors.append(
@@ -813,8 +886,14 @@ class AnttLakeConverter:
         csv_path: Path,
         label: str,
         res: ConvertResult,
+        *,
+        skip_concessionaires: frozenset[str] = frozenset(),
     ) -> None:
-        """Escreve um membro, uma particao ``ano`` por vez (lazy, streaming)."""
+        """Escreve um membro, uma particao ``ano`` por vez (lazy, streaming).
+
+        ``skip_concessionaires`` (nomes normalizados) sao concessionarias que o
+        JSON repete e que ja entram pelo CSV diario: suas linhas ficam de fora.
+        """
         # Tudo como texto (convencao do lake): o esquema nao depende de quantas
         # linhas a inferencia viu e codigos nao perdem zeros a esquerda.
         if csv_path.suffix == ".ndjson":
@@ -857,6 +936,10 @@ class AnttLakeConverter:
         columns = lf.collect_schema().names()
         names = [_norm_col(c) for c in columns]
         lf = lf.rename({c: _norm_col(c) for c in columns})
+        if skip_concessionaires and "concessionaria" in names:
+            lf = lf.filter(
+                ~_norm_expr("concessionaria").is_in(sorted(skip_concessionaires))
+            )
         if lf.head(1).collect().height == 0:
             return
 

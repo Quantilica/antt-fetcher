@@ -520,18 +520,102 @@ def test_volume_sat_json_multidocumento_particiona_por_ano(tmp_path: Path) -> No
     assert again.converted == 0 and again.skipped == 3
 
 
-def test_volume_sat_csv_e_gemeo_do_json_de_mesmo_carimbo(tmp_path: Path) -> None:
+_SAT_CAB = "concessionaria;data_de_passagem;volume_total\n"
+
+
+def _sat_json(*docs: tuple[str, list[tuple[str, int]]]) -> str:
+    """JSON do SAT: um documento ``{"volume_sat":[...]}`` por concessionaria, um
+    registro por linha."""
+    out = []
+    for nome, registros in docs:
+        linhas = [
+            f'{{"concessionaria":"{nome}","data_de_passagem":"{d}","volume_total":{v}}}'
+            for d, v in registros
+        ]
+        out.append('{"volume_sat":[' + ",\n".join(linhas) + "]}")
+    return "\n".join(out) + "\n"
+
+
+def test_volume_sat_json_nao_repete_concessionaria_com_csv_diario(
+    tmp_path: Path,
+) -> None:
+    """O JSON junta concessionarias que tambem tem CSV diario (com outro nome de
+    recurso e outro carimbo): o CSV manda e o JSON so traz as que nao tem CSV."""
     raw_dir = _raw(tmp_path, "rodovias")
-    shutil.copy(_FIXTURES / "volume-sat.json", raw_dir / "volume-sat@20261103.json")
-    shutil.copy(_FIXTURES / "volume-sat.csv", raw_dir / "volume-sat@20261103.csv")
+    (
+        raw_dir / "volume-sat_trafego-de-veiculos-sat-nova-rota-aaaa1111@20261102.csv"
+    ).write_text(
+        _SAT_CAB
+        + "NOVA ROTA DO OESTE;25/03/2025;10\nNOVA ROTA DO OESTE;26/03/2025;20\n",
+        encoding="utf-8",
+    )
+    (raw_dir / "volume-sat@20261103.json").write_text(
+        _sat_json(
+            ("NOVA ROTA DO OESTE", [("2025-03-25", 10), ("2025-03-26", 20)]),
+            ("ELOVIAS", [("2025-10-30", 7)]),
+        ),
+        encoding="utf-8",
+    )
+    plan = {p.path.name: p for p in converter.inventory(raw_dir.parent)}
+    assert plan["volume-sat@20261103.json"].skip_reason is None
+    assert all(p.skip_reason is None for p in plan.values())
     res = converter.convert(raw_dir.parent, tmp_path / "lake")
     assert not res.errors, res.errors
     ds = tmp_path / "lake" / "antt" / "volume-sat"
-    assert sum(_partitions(ds).values()) == 5  # so o JSON; sem duplicar o CSV
+    df = pl.concat([pl.read_parquet(f) for f in ds.rglob("*.parquet")], how="diagonal")
+    contagem = dict(df.group_by("concessionaria").agg(pl.len()).iter_rows())
+    assert contagem == {"NOVA ROTA DO OESTE": 2, "ELOVIAS": 1}
+
+
+def test_volume_sat_json_todo_coberto_por_csv_e_gemeo(tmp_path: Path) -> None:
+    raw_dir = _raw(tmp_path, "rodovias")
+    csv = raw_dir / "volume-sat_trafego-de-veiculos-sat-motiva-bbbb2222@20260628.csv"
+    csv.write_text(
+        _SAT_CAB + "MOTIVA MINAS SP;01/01/2024;5\nMOTIVA MINAS SP;02/01/2024;6\n",
+        encoding="utf-8",
+    )
+    (raw_dir / "volume-sat@20261103.json").write_text(
+        _sat_json(("MOTIVA MINAS SP", [("2024-01-01", 5), ("2024-01-02", 6)])),
+        encoding="utf-8",
+    )
     plan = {p.path.name: p for p in converter.inventory(raw_dir.parent)}
-    assert plan["volume-sat@20261103.json"].dataset == "volume-sat"
-    assert plan["volume-sat@20261103.json"].skip_reason is None
-    assert plan["volume-sat@20261103.csv"].skip_reason == "gemeo"
+    assert plan["volume-sat@20261103.json"].skip_reason == "gemeo"
+    assert plan[csv.name].skip_reason is None
+    res = converter.convert(raw_dir.parent, tmp_path / "lake")
+    assert not res.errors, res.errors
+    ds = tmp_path / "lake" / "antt" / "volume-sat"
+    assert _partitions(ds) == {"ano=2024": 2}
+    assert len(_parquets(ds)) == 1  # so o do CSV
+
+
+def test_volume_sat_csv_mensal_nao_cobre_o_json_diario(tmp_path: Path) -> None:
+    """Concessionaria so com CSV mensal consolidado: o JSON e a unica fonte
+    diaria dela e entra (a granularidade separa os dois)."""
+    raw_dir = _raw(tmp_path, "rodovias")
+    (
+        raw_dir / "volume-sat_trafego-de-veiculos-sat-mensal-cccc3333@20261103.csv"
+    ).write_text(_SAT_CAB + "ELOVIAS;10/2025;7\n", encoding="utf-8")
+    (raw_dir / "volume-sat@20261103.json").write_text(
+        _sat_json(("ELOVIAS", [("2025-10-30", 7)])), encoding="utf-8"
+    )
+    res = converter.convert(raw_dir.parent, tmp_path / "lake")
+    assert not res.errors, res.errors
+    ds = tmp_path / "lake" / "antt" / "volume-sat"
+    assert _granularidades(ds) == {"dia": 1, "mes": 1}
+
+
+def test_volume_sat_nome_com_acento_e_comparado_normalizado(tmp_path: Path) -> None:
+    raw_dir = _raw(tmp_path, "rodovias")
+    (
+        raw_dir / "volume-sat_trafego-de-veiculos-sat-goias-dddd4444@20261103.csv"
+    ).write_bytes(
+        (_SAT_CAB + "ECOVIAS MINAS GOI\xc1S;10/08/2022;3\n").encode("latin-1")
+    )
+    (raw_dir / "volume-sat@20261103.json").write_text(
+        _sat_json(("ECOVIAS MINAS GOIÁS", [("2022-08-10", 3)])), encoding="utf-8"
+    )
+    plan = {p.path.name: p for p in converter.inventory(raw_dir.parent)}
+    assert plan["volume-sat@20261103.json"].skip_reason == "gemeo"
 
 
 def test_volume_sat_ignora_o_manifesto_ao_lado(tmp_path: Path) -> None:
