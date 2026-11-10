@@ -346,6 +346,14 @@ def _declared_year(*names: str) -> int | None:
     return None
 
 
+# Conjunto do lake cujo id difere do slug do pacote no CKAN (o nome local usa o
+# slug do pacote: ``relatorio-de-acompanhamento-...@AAAAMMDD.csv``).
+PACKAGE_DATASETS: dict[str, str] = {
+    "relatorio-de-acompanhamento-de-acidentes-ferroviarios-raaf": (
+        "relatorio-acompanhamento-acidentes-ferroviarios-raaf"
+    ),
+}
+
 _KNOWN_SLUGS = frozenset(DATASETS) | frozenset(CATALOG)
 _KNOWN_SLUGS_BY_LENGTH = sorted(_KNOWN_SLUGS, key=len, reverse=True)
 
@@ -380,6 +388,7 @@ def _detect_dataset_id(filename: str) -> str | None:
     originais da fonte) usam a heuristica.
     """
     slug = _slug_of(filename)
+    slug = PACKAGE_DATASETS.get(slug, slug)
     if slug in DATASETS:
         return slug
     if slug in CATALOG:
@@ -531,17 +540,23 @@ class _Current:
 def _current_versions(files: Sequence[Path]) -> _Current:
     """Escolhe a versao vigente de cada arquivo bruto.
 
-    Arquivo com recurso conhecido (URL no manifesto) e agrupado por pasta e
-    recurso: vale o carimbo mais novo; se ha mais de um arquivo no mesmo carimbo
-    (o mesmo recurso sob o nome nu e sob o nome com chave), fica um so: o de nome
-    com chave, depois o baixado por ultimo. A chave do Parquet e a do nome com
-    chave do recurso; um nome nu ganha o sufixo ``_<id8>`` do recurso, para que
-    recursos diferentes de mesmo nome nao compartilhem o Parquet. Arquivo sem
-    URL segue a regra do nome (``select_current``).
+    Antes de tudo, o arquivo de nome nu que repete (mesmo carimbo e conteudo) um
+    arquivo de nome com chave de recurso e gemeo e sai da disputa: nao e uma
+    versao independente. Arquivo com recurso conhecido (URL no manifesto) e
+    agrupado por pasta e recurso: vale o carimbo mais novo; se ha mais de um
+    arquivo no mesmo carimbo (o mesmo recurso sob o nome nu e sob o nome com
+    chave), fica um so: o baixado por ultimo, com preferencia para o nome com
+    chave. A chave do Parquet e a do nome com chave do recurso; um nome nu ganha
+    o sufixo ``_<id8>`` do recurso, para que recursos diferentes de mesmo nome nu
+    nao compartilhem o Parquet. Arquivo sem URL segue a regra do nome
+    (``select_current``).
     """
+    twins = _same_content_twins(files)
     by_resource: dict[tuple[str, str], list[tuple[Path, _Resource]]] = {}
     by_name: list[Path] = []
     for f in files:
+        if f in twins:
+            continue
         resource = _resource_of(f)
         if resource is None:
             by_name.append(f)
@@ -551,7 +566,6 @@ def _current_versions(files: Sequence[Path]) -> _Current:
             )
 
     selected: dict[Path, str] = {}
-    twins: set[Path] = set()
     superseded: set[Path] = set()
     for f in select_current(by_name):
         selected[f] = _base_key(f)
@@ -575,13 +589,10 @@ def _current_versions(files: Sequence[Path]) -> _Current:
             _base_key(keyed[-1]) if keyed else f"{_base_key(winner)}_{resource.id8}"
         )
         twins.update(f for f, _ in current[1:])
-    twins.update(_same_content_twins(selected))
-    for f in twins:
-        selected.pop(f, None)
     return _Current(selected, frozenset(twins), frozenset(superseded))
 
 
-def _same_content_twins(selected: dict[Path, str]) -> set[Path]:
+def _same_content_twins(files: Sequence[Path]) -> set[Path]:
     """Arquivos de nome nu que repetem, no mesmo carimbo, o conteudo de um arquivo
     de nome com chave de recurso do mesmo conjunto (o bruto sem manifesto nao diz
     que sao o mesmo recurso). O nome com chave fica.
@@ -591,7 +602,7 @@ def _same_content_twins(selected: dict[Path, str]) -> set[Path]:
     fonte e ficam os dois.
     """
     buckets: dict[tuple[Path, str, str, int], list[Path]] = {}
-    for f in selected:
+    for f in files:
         if f.suffix.lower() in _NON_TABULAR_SUFFIXES:
             continue
         try:

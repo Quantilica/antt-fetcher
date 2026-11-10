@@ -877,3 +877,66 @@ def test_mesmo_conteudo_sob_dois_nomes_sem_manifesto_entra_uma_vez(
     assert plan[outro.name].skip_reason is None
     converter.convert(raw_dir.parent, tmp_path / "lake")
     assert _partitions(tmp_path / "lake" / "antt" / "volume-sat") == {"ano=2024": 3}
+
+
+# --- RAAF: slug do pacote x id do conjunto -----------------------------------
+_RAAF = "relatorio-de-acompanhamento-de-acidentes-ferroviarios-raaf"
+
+
+def test_raaf_slug_do_pacote_alimenta_o_conjunto_do_lake(tmp_path: Path) -> None:
+    from antt_fetcher.lake import _detect_dataset_id
+
+    ds_id = "relatorio-acompanhamento-acidentes-ferroviarios-raaf"
+    assert ds_id in converter.datasets()
+    assert _detect_dataset_id(f"{_RAAF}@20260410.csv") == ds_id
+    assert (
+        _detect_dataset_id(f"{_RAAF}_acidentes-dezembro-b3851bf8@20260410.csv") == ds_id
+    )
+
+    raw_dir = _raw(tmp_path, "ferrovias")
+    (raw_dir / f"{_RAAF}@20231130.csv").write_bytes(
+        "Gravidade;Concessionaria;Data_Ocorrencia;Munic\xedpio\n"
+        '"Sim";"FCA";"02/01/2004";"Mimoso"\n'
+        '"N\xe3o";"FCA";"03/01/2010";"Itumirim"\n'.encode("latin-1")
+    )
+    (raw_dir / f"{_RAAF}_indice-de-acidentes-a78db647@20250710.csv").write_text(
+        "concessionaria;ano;indice\nEFC;2006;7,43\nEFC;2007;4,49\n", encoding="utf-8"
+    )
+    plan = {p.path.name: p for p in converter.inventory(raw_dir.parent)}
+    assert {p.dataset for p in plan.values()} == {ds_id}
+    res = converter.convert(raw_dir.parent, tmp_path / "lake")
+    assert not res.errors, res.errors
+    ds = tmp_path / "lake" / "antt" / ds_id
+    assert _partitions(ds) == {
+        "ano=2004": 1,
+        "ano=2006": 1,
+        "ano=2007": 1,
+        "ano=2010": 1,
+    }
+    assert not check_dataset(ds)
+
+
+def test_nome_nu_que_repete_um_nome_com_chave_nao_derruba_o_nu_antigo(
+    tmp_path: Path,
+) -> None:
+    """RAAF: o nome nu mais novo e copia do recurso com chave; o nome nu antigo
+    (outro recurso, outro layout) nao pode ser dado como superado por ele."""
+    raw_dir = _raw(tmp_path, "ferrovias")
+    antigo = raw_dir / f"{_RAAF}@20231130.csv"
+    antigo.write_text("Data_Ocorrencia;Linha\n02/01/2004;A\n", encoding="utf-8")
+    novo = "Data_Ocorrencia;Linha;N_Trem\n12/01/2020;B;1\n13/01/2020;C;2\n"
+    (raw_dir / f"{_RAAF}@20260410.csv").write_text(novo, encoding="utf-8")
+    (raw_dir / f"{_RAAF}_acidentes-dezembro-b3851bf8@20260410.csv").write_text(
+        novo, encoding="utf-8"
+    )
+    plan = {p.path.name: p for p in converter.inventory(raw_dir.parent)}
+    assert plan[antigo.name].skip_reason is None
+    assert plan[f"{_RAAF}@20260410.csv"].skip_reason == "gemeo"
+    converter.convert(raw_dir.parent, tmp_path / "lake")
+    ds = (
+        tmp_path
+        / "lake"
+        / "antt"
+        / "relatorio-acompanhamento-acidentes-ferroviarios-raaf"
+    )
+    assert _partitions(ds) == {"ano=2004": 1, "ano=2020": 2}
