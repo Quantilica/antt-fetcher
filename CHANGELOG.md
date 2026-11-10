@@ -7,6 +7,8 @@ e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR
 
 ## [Não lançado]
 
+## [0.4.0] - 2026-11-10
+
 ### Adicionado
 - O fetcher declara os fatos da fonte (`FetcherInfo`: id canônico, apelidos, órgão, licença, página e cadência) para o registro de fetchers da Quantilica.
 - `docs/`: documentação dos dados conforme a norma, com uma página por dataset (12) e o esquema de referência dos doze. `tests/test_docs.py` verifica a pasta.
