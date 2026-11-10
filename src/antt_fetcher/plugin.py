@@ -11,6 +11,7 @@ from typing import Any
 import typer
 from quantilica.cli.sdk import CheckPlanItem, FetcherApp, make_resolve_groups
 from quantilica.cli.ui import get_console
+from quantilica.core.registry import FetcherInfo
 from quantilica.core.sync import FreshnessPolicy
 
 from .catalog import GROUP_ALIASES, GROUPS, catalog_rows, list_datasets
@@ -39,6 +40,15 @@ def path_builder(
 fetcher = FetcherApp(
     name="antt",
     help="Coletor e conversor Lake Hive de dados abertos da ANTT",
+    info=FetcherInfo(
+        id="antt",
+        nome="ANTT - Dados Abertos",
+        orgao="Agência Nacional de Transportes Terrestres (ANTT)",
+        licenca="Creative Commons Atribuição (CC BY)",
+        homepage="https://dados.antt.gov.br",
+        cadencia="monthly",
+        dominio="transporte",
+    ),
     groups_dict=GROUPS,
     aliases_dict=ALIASES,
     list_datasets=list_datasets,

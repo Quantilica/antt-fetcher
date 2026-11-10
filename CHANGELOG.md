@@ -8,7 +8,11 @@ e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR
 ## [Não lançado]
 
 ### Adicionado
+- O fetcher declara os fatos da fonte (`FetcherInfo`: id canônico, apelidos, órgão, licença, página e cadência) para o registro de fetchers da Quantilica.
 - `docs/`: documentação dos dados conforme a norma, com uma página por dataset (12) e o esquema de referência dos doze. `tests/test_docs.py` verifica a pasta.
+
+### Alterado
+- Requer `quantilica-core>=0.19.0` (e `quantilica-cli>=0.17.0` como host).
 
 ### Corrigido
 - `lake`: arquivos de nome nu (`<slug>@AAAAMMDD.csv`), gravados por versões antigas do fetcher para recursos diferentes do mesmo pacote, se sobrepunham: a seleção da versão vigente guardava só o mais recente de cada nome e descartava os demais recursos (no `rntrc`, 70 dos 71 meses; no `monitriip-servico-regular-paradas`, 45 dos 72 arquivos; também `ciot`, `volume-sat`, `volume-radar`, `quantidade-possiveis-infratores`, `acidentes-rodovias` e o ano de 2023 do `volume-trafego-praca-pedagio`). A identidade do arquivo passa a ser o recurso da fonte (URL do manifesto ao lado): versões do mesmo recurso continuam se substituindo (vale o carimbo mais novo) e recursos diferentes coexistem. Arquivo sem manifesto segue a regra do nome.
