@@ -91,7 +91,7 @@ Descrições do dicionário de dados da ANTT ("Dicionário de Dados - Tráfego d
 
 - Dataset `antt/volume-radar`, particionado por `ano`, um Parquet por arquivo.
 - `ano` vem de `data_da_passagem` (`dd/mm/aaaa` ou `mm/aaaa`).
-- `granularidade` (`dia` ou `mes`) é do arquivo, igual em todas as linhas dele: o arquivo diário e o mensal consolidado do mesmo período caem na mesma partição `ano`, e a coluna os separa. Vale o que o nome do recurso diz (`_mensal_consolidado`); sem isso, o arquivo é `mes` quando pelo menos 90% das linhas têm `mm/aaaa` ou o dia 01, e `dia` no resto.
+- `granularidade` (`dia` ou `mes`) é do arquivo, igual em todas as linhas dele: o arquivo diário e o mensal consolidado do mesmo período caem na mesma partição `ano`, e a coluna os separa. Vale o que o nome do recurso diz (`_mensal_consolidado`); sem isso, o arquivo é `mes` quando pelo menos 90% das linhas têm `mm/aaaa` ou o dia 01, e `dia` no resto. **Ressalva:** um arquivo diário cujo nome não traz `diario` e que só tenha datas no dia 01 (por exemplo, um recorte de um único dia 01) sai `mes`; o nome do recurso, quando existe, prevalece.
 - Arquivo sem cabeçalho: a primeira linha com 15 campos que não é o cabeçalho recebe os nomes do dicionário, na ordem. Se a ordem real das colunas diferisse, as colunas ficariam trocadas; nos 5 arquivos abertos a ordem coincide com a do dicionário.
 - Todas as colunas são texto.
 - Esquema de referência (`volume-radar.schema.json`): 16 colunas, gerado de 6 arquivos de amostra (diários e mensais consolidados, com e sem cabeçalho).

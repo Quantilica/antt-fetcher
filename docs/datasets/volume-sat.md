@@ -91,8 +91,8 @@ Descrições do dicionário de dados da ANTT ("Dicionário de Dados - Tráfego d
 
 - Dataset `antt/volume-sat`, particionado por `ano`, um Parquet por arquivo e ano.
 - `ano` vem de `data_de_passagem` (`dd/mm/aaaa`, `mm/aaaa` ou `aaaa-mm-dd`).
-- `granularidade` (`dia` ou `mes`) é do arquivo, igual em todas as linhas dele: o arquivo diário e o mensal consolidado do mesmo período caem na mesma partição `ano`, e a coluna os separa. Vale o que o nome do recurso diz (`_mensal_consolidado`); sem isso, o arquivo é `mes` quando pelo menos 90% das linhas têm `mm/aaaa` ou o dia 01, e `dia` no resto.
-- O JSON é lido por streaming linha a linha e convertido para texto (`101.42`, `2`), menos as concessionárias que já têm CSV diário. Linha fora do formato de um registro por linha é erro.
+- `granularidade` (`dia` ou `mes`) é do arquivo, igual em todas as linhas dele: o arquivo diário e o mensal consolidado do mesmo período caem na mesma partição `ano`, e a coluna os separa. Vale o que o nome do recurso diz (`_mensal_consolidado`); sem isso, o arquivo é `mes` quando pelo menos 90% das linhas têm `mm/aaaa` ou o dia 01, e `dia` no resto. **Ressalva:** um arquivo diário cujo nome não traz `diario` e que só tenha datas no dia 01 (por exemplo, um recorte de um único dia 01) sai `mes`; o nome do recurso, quando existe, prevalece.
+- O JSON é lido por streaming linha a linha e convertido para texto (`101.42`, `2`), menos as linhas cuja (concessionária, mês) já entra por um CSV diário. Linha fora do formato de um registro por linha é erro.
 - Esquema de referência (`volume-sat.schema.json`): 16 colunas, gerado da conversão de 5 CSV de amostra (diário e mensal consolidado) e dos primeiros 3 MB do JSON.
 
 ## Cuidados de uso
