@@ -954,7 +954,7 @@ def test_colisao_de_id8_no_conjunto_e_erro_explicito(tmp_path: Path) -> None:
         "01/01/2024;2\n",
     )  # fmt: skip
     res = converter.convert(raw_dir.parent, tmp_path / "lake")
-    assert len(res.errors) == 1 and "colisao" in res.errors[0]
+    assert len(res.errors) == 2 and all("colisao" in e for e in res.errors)
     assert not list((tmp_path / "lake").rglob("*.parquet"))
 
 
@@ -1413,3 +1413,107 @@ def test_hash_ilegivel_nao_derruba_a_selecao(tmp_path: Path, monkeypatch) -> Non
     monkeypatch.setattr(lake, "sha256_file", falha)
     plan = converter.inventory(raw_dir.parent)
     assert all(p.skip_reason is None for p in plan)  # sem hash, nao ha gemeo
+
+
+# --- colisao de chave e remocao do JSON: revisao 2 ---------------------------
+def test_colisao_de_id8_so_afeta_o_conjunto_dela(tmp_path: Path) -> None:
+    raw_dir = _raw(tmp_path, "rodovias")
+    _raw_com_manifesto(
+        raw_dir, "acidentes-rodovias@20250101.csv", _RID_A, "a.csv", "01/01/2024;1\n"
+    )
+    outro = "aaaa1111-ffff-4fff-8fff-ffffffffffff"
+    _raw_com_manifesto(
+        raw_dir, "acidentes-rodovias_b-aaaa1111@20250201.csv", outro, "b.csv",
+        "01/01/2024;2\n",
+    )  # fmt: skip
+    ok = _raw(tmp_path, "cargas") / "rntrc@20250101.csv"
+    ok.write_text("nome;numero\nA;1\n", encoding="utf-8")
+    _write_manifest(ok, "https://x/resource/" + _RID_B + "/download/rntrc_01_2025.csv")
+
+    res = converter.convert(raw_dir.parent, tmp_path / "lake", datasets=["rntrc"])
+    assert not res.errors, res.errors
+    assert _partitions(tmp_path / "lake" / "antt" / "rntrc") == {"ano=2025": 1}
+
+    plan = {p.path.name: p for p in converter.inventory(raw_dir.parent)}  # sem excecao
+    assert plan["rntrc@20250101.csv"].dataset == "rntrc"
+    assert plan["acidentes-rodovias@20250101.csv"].dataset is None
+    assert plan["acidentes-rodovias_b-aaaa1111@20250201.csv"].dataset is None
+
+
+def test_nome_sem_carimbo_usa_o_conjunto_como_base_da_chave(tmp_path: Path) -> None:
+    raw_dir = _raw(tmp_path, "rodovias")
+    raw = raw_dir / "demonstrativo_acidentes.csv"
+    raw.write_text("data;km\n01/01/2024;1\n", encoding="utf-8")
+    _write_manifest(raw, "https://x/resource/" + _RID_A + "/download/d.csv")
+    res = converter.convert(raw_dir.parent, tmp_path / "lake")
+    assert not res.errors, res.errors
+    ds = tmp_path / "lake" / "antt" / "acidentes-rodovias"
+    assert _parquets(ds) == ["acidentes-rodovias_aaaa1111.parquet"]
+
+
+def test_json_e_csv_de_nome_nu_sem_manifesto_nao_se_apagam(tmp_path: Path) -> None:
+    """Mesma chave (`volume-sat`) para o JSON e para o CSV de nome nu: colisao
+    explicita, nada gravado e nada apagado (a concessionaria nao some)."""
+    raw_dir = _raw(tmp_path, "rodovias")
+    lake = tmp_path / "lake"
+    (raw_dir / "volume-sat@20260628.csv").write_text(
+        _SAT_CAB + "VIA 040;05/01/2024;2\nVIA 040;06/01/2024;3\n", encoding="utf-8"
+    )
+    converter.convert(raw_dir.parent, lake)
+    ds = lake / "antt" / "volume-sat"
+    assert _linhas_por_concessionaria(ds) == {"VIA 040": 2}
+    (raw_dir / "volume-sat@20260628.json").write_text(
+        _sat_json(("VIA 040", [("2024-01-05", 2), ("2024-01-06", 3)])), encoding="utf-8"
+    )
+    for _ in range(2):  # a cada execucao
+        res = converter.convert(raw_dir.parent, lake)
+        assert len(res.errors) == 2 and all("colisao" in e for e in res.errors)
+        assert _linhas_por_concessionaria(ds) == {"VIA 040": 2}
+
+
+def test_purge_do_json_respeita_chaves_de_outros_arquivos(tmp_path: Path) -> None:
+    from antt_fetcher.lake import _purge_json_parquets
+
+    raw_dir = _raw(tmp_path, "rodovias")
+    (raw_dir / "volume-sat@20260628.csv").write_text(
+        _SAT_CAB + "VIA 040;05/01/2024;2\n", encoding="utf-8"
+    )
+    converter.convert(raw_dir.parent, tmp_path / "lake")
+    ds = tmp_path / "lake" / "antt" / "volume-sat"
+    assert _purge_json_parquets(ds, "volume-sat", None, {"volume-sat"}) == []
+    assert _parquets(ds) == ["volume-sat.parquet"]
+    # Sem protecao, so apaga se o rodape confirma a chave; aqui confirma.
+    assert len(_purge_json_parquets(ds, "volume-sat", None)) == 1
+
+
+def test_json_com_escrita_que_falha_nao_perde_o_parquet_antigo(
+    tmp_path: Path,
+) -> None:
+    raw_dir = _raw(tmp_path, "rodovias")
+    lake = tmp_path / "lake"
+    ds = lake / "antt" / "volume-sat"
+    json = raw_dir / "volume-sat@20261103.json"
+    json.write_text(
+        _sat_json(
+            ("NOVA ROTA DO OESTE", [("2025-03-25", 10)]),
+            ("ELOVIAS", [("2025-10-30", 7)]),
+        ),
+        encoding="utf-8",
+    )
+    converter.convert(raw_dir.parent, lake)
+    assert _linhas_por_concessionaria(ds) == {"NOVA ROTA DO OESTE": 1, "ELOVIAS": 1}
+    # Chega o CSV da Nova Rota (a identidade do JSON muda) e o JSON novo vem
+    # truncado: a escrita falha e as linhas do JSON antigo continuam la.
+    (raw_dir / "volume-sat_trafego-nova-rota-aaaa1111@20261104.csv").write_text(
+        _SAT_CAB + "NOVA ROTA DO OESTE;25/03/2025;10\n", encoding="utf-8"
+    )
+    json.write_text(
+        _sat_json(("NOVA ROTA DO OESTE", [("2025-03-25", 10)]))
+        + '{"volume_sat":[{"concessionaria":"ELOVIAS","data_de_passagem":"2025-10-30"},'
+        + "\nlixo\n]}\n",
+        encoding="utf-8",
+    )
+    res = converter.convert(raw_dir.parent, lake)
+    assert any("volume-sat@20261103.json" in e for e in res.errors)
+    assert "volume-sat.parquet" in _parquets(ds)  # o antigo ficou
+    assert _linhas_por_concessionaria(ds)["ELOVIAS"] == 1

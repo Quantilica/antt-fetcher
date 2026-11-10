@@ -11,9 +11,9 @@ import re
 import tempfile
 import unicodedata
 import zipfile
-from collections.abc import Callable, Iterable, Iterator, Sequence
+from collections.abc import Callable, Collection, Iterable, Iterator, Sequence
 from contextlib import AbstractContextManager, contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 from typing import IO
@@ -581,9 +581,32 @@ def _json_key(base: str, skipped: frozenset[Pair]) -> str:
     return f"{base}_cov{hashlib.sha1(text.encode('utf-8')).hexdigest()[:8]}"  # noqa: S324
 
 
-def _purge_json_parquets(dataset_dir: Path, base: str, keep: str | None) -> list[Path]:
+def _footer_file_key(path: Path) -> str | None:
+    """Chave de arquivo gravada no rodape do Parquet (``None`` se ilegivel)."""
+    try:
+        import pyarrow.parquet as pq
+
+        value = (pq.ParquetFile(path).metadata.metadata or {}).get(
+            b"quantilica.file_key"
+        )
+    except Exception:  # noqa: BLE001 - rodape ilegivel: nao e nosso para apagar
+        return None
+    return value.decode() if value else None
+
+
+def _purge_json_parquets(
+    dataset_dir: Path,
+    base: str,
+    keep: str | None,
+    protected: Collection[str] = (),
+) -> list[Path]:
     """Remove, de todas as particoes, os Parquets da chave do JSON (``base`` e
-    ``base_cov<hash>``, com ou sem ``-NNN``) que nao sao ``keep``."""
+    ``base_cov<hash>``, com ou sem ``-NNN``) que nao sao ``keep``.
+
+    Nunca apaga um Parquet de outro arquivo: a chave por nome tem de ser a do JSON
+    (nao uma das ``protected``, chaves dos outros arquivos vigentes) e o rodape
+    (``quantilica.file_key``) tem de dizer a mesma chave.
+    """
     pattern = re.compile(
         rf"^({re.escape(base)}(?:_cov[0-9a-f]{{8}})?)(?:-\d{{3}})?\.parquet$"
     )
@@ -593,9 +616,17 @@ def _purge_json_parquets(dataset_dir: Path, base: str, keep: str | None) -> list
     with dataset_lock(dataset_dir):
         for path in sorted(dataset_dir.glob("ano=*/*.parquet")):
             match = pattern.match(path.name)
-            if match and match[1] != keep:
-                path.unlink()
-                removed.append(path)
+            if not match or match[1] == keep or match[1] in protected:
+                continue
+            if _footer_file_key(path) != match[1]:
+                logger.warning(
+                    "ANTT %s: nao e Parquet do JSON (rodape diz %r); mantido",
+                    path,
+                    _footer_file_key(path),
+                )
+                continue
+            path.unlink()
+            removed.append(path)
     return removed
 
 
@@ -687,12 +718,15 @@ class _Current:
 
     ``selected`` guarda cada arquivo vigente com a chave-base do seu Parquet;
     ``twins`` os arquivos que repetem o conteudo de um vigente (mesmo recurso,
-    mesmo carimbo) sob outro nome; ``superseded`` as versoes antigas.
+    mesmo carimbo) sob outro nome; ``superseded`` as versoes antigas;
+    ``colliding`` os arquivos que ficaram de fora porque outro arquivo do mesmo
+    conjunto daria a mesma chave de Parquet (arquivo -> motivo).
     """
 
     selected: dict[Path, str]
     twins: frozenset[Path]
     superseded: frozenset[Path]
+    colliding: dict[Path, str] = field(default_factory=dict)
 
 
 def _current_versions(files: Sequence[Path]) -> _Current:
@@ -725,7 +759,7 @@ def _current_versions(files: Sequence[Path]) -> _Current:
 
     selected: dict[Path, str] = {}
     superseded: set[Path] = set()
-    key_owner: dict[str, str] = {}
+    owner_of: dict[Path, str] = {}
     for f in select_current(by_name):
         selected[f] = _base_key(f)
     superseded.update(set(by_name) - set(selected))
@@ -743,16 +777,33 @@ def _current_versions(files: Sequence[Path]) -> _Current:
         # A chave do Parquet vem so do recurso (``<slug>_<id8>``), nunca do nome
         # do arquivo: o mesmo recurso que passa de nome nu a nome com chave (ou
         # troca de nome na fonte) continua no mesmo Parquet.
-        key = f"{_slug_of(winner.name)}_{resource.id8}".lower()
-        owner = key_owner.setdefault(key, resource.ident)
-        if owner != resource.ident:
-            raise ValueError(
-                f"colisao de chave de Parquet {key!r}: os recursos {owner!r} e "
-                f"{resource.ident!r} do mesmo conjunto tem o mesmo id8"
-            )
-        selected[winner] = key
+        base = (
+            _slug_of(winner.name)
+            or _dataset_of(winner.name, winner.name)
+            or file_key(winner).lower()
+        )
+        selected[winner] = f"{base}_{resource.id8}".lower()
+        owner_of[winner] = resource.ident
         twins.update(f for f, _ in current[1:])
-    return _Current(selected, frozenset(twins), frozenset(superseded))
+
+    # Dois arquivos vigentes do mesmo conjunto com a mesma chave de Parquet (id8
+    # repetido, JSON e CSV de nome nu, mesmo nome em duas pastas) escreveriam um
+    # sobre o outro: nenhum dos dois e convertido e cada um vira um erro.
+    owners: dict[tuple[str, str], dict[str, list[Path]]] = {}
+    for f, key in selected.items():
+        dataset = _dataset_of(f.name, f.name) or ""
+        owner = owner_of.get(f, f.as_posix())
+        owners.setdefault((dataset, key), {}).setdefault(owner, []).append(f)
+    colliding: dict[Path, str] = {}
+    for (_, key), by_owner in owners.items():
+        if len(by_owner) > 1:
+            names = ", ".join(sorted(f.name for fs in by_owner.values() for f in fs))
+            for fs in by_owner.values():
+                for f in fs:
+                    colliding[f] = f"colisao de chave de Parquet {key!r} entre {names}"
+    for f in colliding:
+        del selected[f]
+    return _Current(selected, frozenset(twins), frozenset(superseded), colliding)
 
 
 def _same_content_twins(files: Sequence[Path]) -> set[Path]:
@@ -947,6 +998,14 @@ class AnttLakeConverter:
         current = _current_versions(files)
         plan: list[Planned] = []
         for raw_file in files:
+            if raw_file in current.colliding:
+                logger.warning(
+                    "ANTT %s: %s; arquivo nao convertido",
+                    raw_file.name,
+                    current.colliding[raw_file],
+                )
+                plan.append(Planned(raw_file))  # lacuna de cobertura, nao exclusao
+                continue
             if raw_file in current.twins:
                 plan.append(Planned(raw_file, skip_reason="gemeo"))
                 continue
@@ -1029,11 +1088,12 @@ class AnttLakeConverter:
             and not f.name.endswith(".manifest.json")
             and not f.name.endswith(".tmp")
         ]
-        try:
-            current = _current_versions(sorted(all_raw_files))
-        except ValueError as exc:  # colisao de chave: nada e escrito
-            res.errors.append(f"ANTT: {exc}")
-            return res
+        current = _current_versions(sorted(all_raw_files))
+        for colliding, reason in sorted(current.colliding.items()):
+            if _dataset_of(colliding.name, colliding.name) in writers:
+                res.errors.append(
+                    f"ANTT {colliding.name}: {reason}; arquivo nao convertido"
+                )
 
         for raw_file in sorted(current.selected):
             try:
@@ -1059,26 +1119,41 @@ class AnttLakeConverter:
                     f"{current.selected[raw_file]}.csv", name
                 ).lower()
                 skip: frozenset[Pair] = frozenset()
+                after_write: Callable[[], object] | None = None
                 if name is None and raw_file.suffix.lower() == ".json":
                     dataset_dir = lake_path / self.source_id / ds_id
+                    others = {
+                        k
+                        for f, k in current.selected.items()
+                        if f != raw_file and _dataset_of(f.name, f.name) == ds_id
+                    }
                     try:
                         skip, fully_covered = _json_coverage(
                             raw_file, ds_id, current.selected
                         )
                         base = key
                         key = _json_key(base, skip)
-                        # O JSON depende dos CSV: a identidade da escrita inclui o
-                        # que sai dele, e o Parquet de uma identidade anterior (ou
-                        # o JSON que ficou todo coberto) e removido de todas as
-                        # particoes, porque o LakeWriter so mexe nas que reescreve.
-                        _purge_json_parquets(
-                            dataset_dir, base, None if fully_covered else key
-                        )
+                        if fully_covered:
+                            # Nada a gravar: os Parquets antigos do JSON saem ja.
+                            _purge_json_parquets(dataset_dir, base, None, others)
+                            continue
                     except Exception as exc:
                         res.errors.append(f"Erro ao ler {raw_file.name}: {exc}")
                         continue
-                    if fully_covered:
-                        continue
+
+                    # O JSON depende dos CSV: a identidade da escrita inclui o que
+                    # sai dele. As outras identidades do JSON so saem, de todas as
+                    # particoes (o LakeWriter so mexe nas que reescreve), DEPOIS
+                    # de a nova ser gravada sem erro: se a escrita falha, as linhas
+                    # antigas continuam no lake.
+                    def after_write(
+                        dataset_dir: Path = dataset_dir,
+                        base: str = base,
+                        key: str = key,
+                        others: set[str] = others,
+                    ) -> object:
+                        return _purge_json_parquets(dataset_dir, base, key, others)
+
                 try:
                     with _member_as_text(raw_file, name) as csv_path:
                         self._convert_member(
@@ -1091,6 +1166,8 @@ class AnttLakeConverter:
                             res,
                             skip_pairs=skip,
                         )
+                    if after_write is not None:
+                        after_write()
                 except Exception as exc:
                     res.errors.append(
                         f"Erro ao converter {label} em {raw_file.name}: {exc}"
