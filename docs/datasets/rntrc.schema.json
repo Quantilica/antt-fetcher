@@ -1,0 +1,77 @@
+{
+  "fonte": "antt",
+  "dataset": "rntrc",
+  "gerado_em": "2026-11-10T14:17:38+00:00",
+  "particoes": [
+    "ano"
+  ],
+  "colunas": [
+    {
+      "nome": "nome_transportador",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "numero_rntrc",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "data_primeiro_cadastro",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "situacao_rntrc",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "cpfcnpjtransportador",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "categoria_transportador",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "cep",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "municipio",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "uf",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "equiparado",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "data_situacao_rntrc",
+      "tipos": [
+        "large_string"
+      ]
+    }
+  ],
+  "arquivos": 1
+}

@@ -1,0 +1,155 @@
+{
+  "fonte": "antt",
+  "dataset": "acidentes-rodovias",
+  "gerado_em": "2026-11-10T14:17:38+00:00",
+  "particoes": [
+    "ano"
+  ],
+  "colunas": [
+    {
+      "nome": "data",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "horario",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "n_da_ocorrencia",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "tipo_de_ocorrencia",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "km",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "trecho",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "sentido",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "tipo_de_acidente",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "automovel",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "bicicleta",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "caminhao",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "moto",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "onibus",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "outros",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "tracao_animal",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "transporte_de_cargas_especiais",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "trator_maquinas",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "utilitarios",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "ilesos",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "levemente_feridos",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "moderadamente_feridos",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "gravemente_feridos",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "mortos",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "tipo_de_pista",
+      "tipos": [
+        "large_string"
+      ]
+    }
+  ],
+  "arquivos": 20
+}

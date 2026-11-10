@@ -1,0 +1,59 @@
+{
+  "fonte": "antt",
+  "dataset": "ciot",
+  "gerado_em": "2026-11-10T14:17:38+00:00",
+  "particoes": [
+    "ano"
+  ],
+  "colunas": [
+    {
+      "nome": "municipio_origem",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "uf_origem",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "municipio_destino",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "uf_destino",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "ncm_carga",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "quantidade_ciots",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "quantidade_trc",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "quantidade_contratantes",
+      "tipos": [
+        "large_string"
+      ]
+    }
+  ],
+  "arquivos": 4
+}

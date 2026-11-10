@@ -7,6 +7,9 @@ e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR
 
 ## [Não lançado]
 
+### Adicionado
+- `docs/`: documentação dos dados conforme a norma, com uma página por dataset (12) e o esquema de referência dos onze que têm dados convertidos. O `relatorio-acompanhamento-acidentes-ferroviarios-raaf` fica como `so-bruto`: nenhum arquivo do bruto chega a ele. `tests/test_docs.py` verifica a pasta.
+
 ## [0.3.2] - 2026-11-06
 
 ### Corrigido

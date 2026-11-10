@@ -1,0 +1,59 @@
+{
+  "fonte": "antt",
+  "dataset": "vale-pedagio-obrigatorio",
+  "gerado_em": "2026-11-10T14:17:38+00:00",
+  "particoes": [
+    "ano"
+  ],
+  "colunas": [
+    {
+      "nome": "ano_de_emissao",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "mes_de_emissao",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "categoria_do_transportador",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "modelo_do_vpo",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "no_de_transportadores",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "no_de_veiculos",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "no_de_vpos",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "valor_dos_vpos",
+      "tipos": [
+        "large_string"
+      ]
+    }
+  ],
+  "arquivos": 2
+}

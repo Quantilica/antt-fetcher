@@ -1,0 +1,89 @@
+{
+  "fonte": "antt",
+  "dataset": "praca-de-pedagio",
+  "gerado_em": "2026-11-10T14:17:38+00:00",
+  "particoes": [
+    "ano"
+  ],
+  "colunas": [
+    {
+      "nome": "concessionaria",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "praca_de_pedagio",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "ano_do_pnv_snv",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "rodovia",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "uf",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "km_m",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "municipal",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "tipo_de_pista",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "sentido",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "situacao",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "data_da_inativacao",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "latitude",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "longitude",
+      "tipos": [
+        "large_string"
+      ]
+    }
+  ],
+  "arquivos": 1
+}

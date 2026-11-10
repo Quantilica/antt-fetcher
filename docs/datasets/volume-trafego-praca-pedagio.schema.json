@@ -1,0 +1,65 @@
+{
+  "fonte": "antt",
+  "dataset": "volume-trafego-praca-pedagio",
+  "gerado_em": "2026-11-10T14:17:38+00:00",
+  "particoes": [
+    "ano"
+  ],
+  "colunas": [
+    {
+      "nome": "concessionaria",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "mes_ano",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "sentido",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "praca",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "tipo_cobranca",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "categoria",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "tipo_de_veiculo",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "volume_total",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "categoria_eixo",
+      "tipos": [
+        "large_string"
+      ]
+    }
+  ],
+  "arquivos": 5
+}

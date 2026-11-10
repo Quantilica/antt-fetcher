@@ -73,6 +73,10 @@ Quatro pacotes não têm CSV nem JSON (só PDF, KMZ ou painel) e ficam apenas
 listados. O portal está atrás de um WAF (F5): respostas "Request Rejected" são
 tratadas como falha transitória, nunca como arquivo.
 
+## Documentação dos dados
+
+O que cada dataset contém, de onde vem, como chega ao lake e os cuidados de uso: [docs/README.md](docs/README.md).
+
 ## Licença
 
 Distribuído sob licença MIT. Consulte [LICENSE](LICENSE) para mais detalhes.

@@ -1,0 +1,101 @@
+{
+  "fonte": "antt",
+  "dataset": "quantidade-possiveis-infratores",
+  "gerado_em": "2026-11-10T14:17:38+00:00",
+  "particoes": [
+    "ano"
+  ],
+  "colunas": [
+    {
+      "nome": "concessionaria",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "identificador",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "rodovia",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "uf",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "km_m",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "municipio",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "tipo_de_pista",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "latitude",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "longitude",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "data_da_passagem",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "sentido_da_passagem",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "faixa_da_passagem",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "velocidade",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "tipo_de_veiculo",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "volume_total",
+      "tipos": [
+        "large_string"
+      ]
+    }
+  ],
+  "arquivos": 6
+}

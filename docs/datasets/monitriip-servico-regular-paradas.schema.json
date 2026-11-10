@@ -1,0 +1,95 @@
+{
+  "fonte": "antt",
+  "dataset": "monitriip-servico-regular-paradas",
+  "gerado_em": "2026-11-10T14:17:38+00:00",
+  "particoes": [
+    "ano"
+  ],
+  "colunas": [
+    {
+      "nome": "codigo_viagem",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "cnpj",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "placa",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "motivo_parada",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "latitude",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "longitude",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "pdop",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "data_parada",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "numero_imei",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "nu_linha",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "tipo_viagem",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "data_viagem_progamada",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "hora_viagem_progamada",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "sentido_linha",
+      "tipos": [
+        "large_string"
+      ]
+    }
+  ],
+  "arquivos": 2
+}

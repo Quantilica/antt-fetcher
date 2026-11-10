@@ -1,0 +1,23 @@
+{
+  "fonte": "antt",
+  "dataset": "investimentos",
+  "gerado_em": "2026-11-10T14:17:38+00:00",
+  "particoes": [
+    "ano"
+  ],
+  "colunas": [
+    {
+      "nome": "concessionaria",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "valor",
+      "tipos": [
+        "large_string"
+      ]
+    }
+  ],
+  "arquivos": 16
+}
