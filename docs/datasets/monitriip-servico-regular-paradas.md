@@ -60,13 +60,13 @@ Paradas das viagens do serviço regular de transporte rodoviário interestadual 
 
 - O fetcher baixa os CSV do pacote `monitriip-servico-regular-paradas` (`https://dados.antt.gov.br/dataset/monitriip-servico-regular-paradas`), um recurso por mês desde janeiro de 2019 (71 CSV).
 - No bruto: `monitriip-servico-regular-paradas_<mês>---viagens-do-servico-regular---par-<id>@AAAAMMDD.csv`; os arquivos antigos têm o nome nu `monitriip-servico-regular-paradas@AAAAMMDD.csv`, que recebeu meses diferentes ao longo do tempo.
-- Conferido em 2026-11-10 pela listagem do bruto: 72 arquivos (cerca de 8 GB), 25 vigentes (2,4 GB): janeiro de 2019 a novembro de 2020, abril de 2021 e dezembro de 2024 (este com nome nu).
+- Conferido em 2026-11-10 pela listagem do bruto: 72 arquivos (cerca de 8 GB), 71 vigentes (7,9 GB), um por mês: os manifestos cobrem 71 meses, de 01/2019 a 12/2024 (sem 10/2024, que o pacote não tem). A cópia de nome nu de novembro de 2020 (`@20210105`) tem a mesma URL do recurso com chave e não entra duas vezes; o mês 05/2021 tem manifesto e não tem arquivo, e `monitriip-servico-regular-paradas@20210719.csv` está sem manifesto (segue a regra do nome).
 
 ## Conteúdo
 
 - Unidade de análise: uma parada. Chave não verificada.
-- Cobertura anunciada pela fonte: anual a partir de 2019, atualização mensal. **O que o lake tem: 2019-01 a 2020-11, 2021-04 e 2024-12.** Faltam dezembro de 2020, janeiro a março de 2021 e maio de 2021 a novembro de 2024, e tudo depois de dezembro de 2024.
-- Layout: 14 colunas no arquivo conferido (2 arquivos de abril e maio de 2020 abertos; os cabeçalhos dos 25 vigentes coincidem). O dicionário lista 14 campos com `data_viagem_programada`; o arquivo traz `data_viagem_progamada`.
+- Cobertura anunciada pela fonte: anual a partir de 2019, atualização mensal. **O que o lake tem: 2019-01 a 2024-12**, exceto 2024-10 (que o pacote não tem) e 2021-05 (manifesto sem arquivo; só entra se `@20210719`, sem manifesto, for esse mês). Não há nada depois de dezembro de 2024.
+- Layout: 14 colunas, iguais nos cabeçalhos dos 71 arquivos vigentes (2 arquivos de abril e maio de 2020 abertos inteiros). O dicionário lista 14 campos com `data_viagem_programada`; o arquivo traz `data_viagem_progamada`.
 - Nulos (amostra de 102.874 linhas de 2 arquivos): nenhum. Coordenadas: a longitude chega a `0.0` e a latitude a `2.80` em linhas isoladas, valores que não condizem com o território das linhas (não investigado).
 
 ## Variáveis
@@ -92,15 +92,15 @@ Descrições do dicionário de dados da ANTT ("Dicionário de Dados - Viagens do
 
 ## No lake
 
-- Dataset `antt/monitriip-servico-regular-paradas`, particionado por `ano`, um Parquet por arquivo.
+- Dataset `antt/monitriip-servico-regular-paradas`, particionado por `ano`, um Parquet por arquivo (um por mês). O nome do Parquet de um arquivo de nome nu é `monitriip-servico-regular-paradas_<id8>.parquet`, em que `<id8>` são os 8 primeiros caracteres do id do recurso na URL do manifesto; os de nome com chave mantêm a chave do nome.
 - `ano` vem de `data_parada` (grupo de 4 dígitos, aqui `dd-mm-aaaa hh:mm:ss`).
 - Todas as colunas são texto.
 - Esquema de referência (`monitriip-servico-regular-paradas.schema.json`): 14 colunas, gerado de 2 arquivos de amostra (abril e maio de 2020).
 
 ## Cuidados de uso
 
-- **Arquivos de meses ou anos diferentes colidem no nome e só o mais recente é convertido.** O bruto tem arquivos com nome nu (`monitriip-servico-regular-paradas@AAAAMMDD.csv`), gravados por versões antigas do fetcher que davam o mesmo nome a recursos diferentes do pacote, ao lado dos arquivos com chave de recurso (`monitriip-servico-regular-paradas_<recurso>-<id>@AAAAMMDD.csv`). `select_current` agrupa por nome sem a data e fica só com o mais novo de cada nome; os outros nomes nus ficam de fora do lake. Aqui, 45 dos 72 arquivos do bruto têm conteúdo (URL e hash) ausente do conjunto vigente: todos os meses de 2021 a novembro de 2024 e os de 2025 em diante.
-- **Cópia do mesmo mês com nome nu e com chave.** `monitriip-servico-regular-paradas@20210105.csv` e o recurso de novembro de 2020 têm o mesmo hash no manifesto (96.359.391 bytes), mas o arquivo de nome nu tem 79.364.096 bytes no bruto conferido; a divergência de tamanho não foi investigada.
+- **Nomes nus de meses diferentes.** O bruto tem arquivos de nome nu (`monitriip-servico-regular-paradas@AAAAMMDD.csv`), gravados por versões antigas do fetcher que davam o mesmo nome a recursos diferentes do pacote (um por mês, de 12/2020 a 12/2024). A versão vigente é escolhida por recurso (URL do manifesto ao lado), então todos entram, cada um no seu Parquet. Um arquivo de nome nu sem manifesto ao lado segue a regra do nome (só o mais recente de cada nome).
+- **Cópia do mesmo mês com nome nu e com chave.** `monitriip-servico-regular-paradas@20210105.csv` e o recurso de novembro de 2020 têm a mesma URL e o mesmo hash no manifesto (96.359.391 bytes), mas o arquivo de nome nu tem 79.364.096 bytes no bruto conferido (a divergência de tamanho não foi investigada). O conversor trata como um só e usa o de nome com chave; o de nome nu aparece como `gemeo` no `inventory()`.
 - **Manifesto sem arquivo.** O mês de maio de 2021 tem manifesto e não tem o CSV no bruto conferido.
 - **Dado pessoal indireto.** Placa, IMEI e coordenadas por horário permitem seguir um veículo.
 - **Datas mistas.** `data_parada` usa `dd-mm-aaaa hh:mm:ss` e `data_viagem_progamada` usa `aaaa-mm-dd`.

@@ -1,0 +1,179 @@
+{
+  "fonte": "antt",
+  "dataset": "relatorio-acompanhamento-acidentes-ferroviarios-raaf",
+  "gerado_em": "2026-11-10T14:54:55+00:00",
+  "particoes": [
+    "ano"
+  ],
+  "colunas": [
+    {
+      "nome": "gravidade",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "concessionaria",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "data_ocorrencia",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "hora_ocorrencia",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "uf",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "municipio",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "linha",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "quilometro_inicial",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "estacao_anterior",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "estacao_posterior",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "perimetro_urbano",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "causa_direta",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "natureza",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "interrupcao",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "prefixo",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "servico_transporte",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "n_feridos",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "n_obitos",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "mercadoria",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "equipagem",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "outra_ferrovia",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "pn",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "indice_de_acidentes_por_milhao_de_trem_km",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "quilometro_final",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "causa_contibutiva",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "n_trem",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "double_stack",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "prejuizo_financeiro",
+      "tipos": [
+        "large_string"
+      ]
+    }
+  ],
+  "arquivos": 44
+}

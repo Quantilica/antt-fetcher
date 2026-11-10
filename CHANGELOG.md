@@ -8,7 +8,7 @@ e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR
 ## [Não lançado]
 
 ### Adicionado
-- `docs/`: documentação dos dados conforme a norma, com uma página por dataset (12) e o esquema de referência dos onze que têm dados convertidos. O `relatorio-acompanhamento-acidentes-ferroviarios-raaf` fica como `so-bruto`: nenhum arquivo do bruto chega a ele. `tests/test_docs.py` verifica a pasta.
+- `docs/`: documentação dos dados conforme a norma, com uma página por dataset (12) e o esquema de referência dos doze. `tests/test_docs.py` verifica a pasta.
 
 ### Corrigido
 - `lake`: arquivos de nome nu (`<slug>@AAAAMMDD.csv`), gravados por versões antigas do fetcher para recursos diferentes do mesmo pacote, se sobrepunham: a seleção da versão vigente guardava só o mais recente de cada nome e descartava os demais recursos (no `rntrc`, 70 dos 71 meses; no `monitriip-servico-regular-paradas`, 45 dos 72 arquivos; também `ciot`, `volume-sat`, `volume-radar`, `quantidade-possiveis-infratores`, `acidentes-rodovias` e o ano de 2023 do `volume-trafego-praca-pedagio`). A identidade do arquivo passa a ser o recurso da fonte (URL do manifesto ao lado): versões do mesmo recurso continuam se substituindo (vale o carimbo mais novo) e recursos diferentes coexistem. Arquivo sem manifesto segue a regra do nome.
@@ -17,6 +17,16 @@ e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR
 - `lake`: o `relatorio-acompanhamento-acidentes-ferroviarios-raaf` convertia 0 linhas: os arquivos do bruto usam o slug do pacote (`relatorio-de-acompanhamento-de-acidentes-ferroviarios-raaf`) e o conversor procurava o id do conjunto, diferente. O slug do pacote passa a alimentar o conjunto (`PACKAGE_DATASETS`). O arquivo de nome nu que repete, no mesmo carimbo, o conteúdo de um arquivo de nome com chave deixa de derrubar o nome nu mais antigo (outro recurso) pela regra do nome.
 - `lake`: `volume-trafego-praca-pedagio`, `volume-radar` e `volume-sat` publicam o mesmo tráfego em arquivos diários e em arquivos mensais consolidados (conferido: 834.732.408 veículos nos dois arquivos de 2024 das praças; totais mensais idênticos no radar da CRT e da Via040 e no SAT da Autopista Fluminense), e os dois caíam na mesma partição `ano`, de modo que somar a partição contava o tráfego duas vezes. Os três conjuntos ganham a coluna `granularidade` (`dia` ou `mes`), lida do formato da data de cada linha (`dd/mm/aaaa` e `aaaa-mm-dd` são `dia`, `mm/aaaa` é `mes`; nula se a data não tem nenhum dos dois). Para somar o tráfego, filtre uma só granularidade. O esquema público de cada um ganha uma coluna; as partições não mudam.
 - `lake`: o JSON do `volume-sat` repete concessionárias que têm CSV diário (Nova Rota do Oeste, Motiva Minas SP, EPR Via Mineira e Elovias, 719.856 registros, com as mesmas contagens de registros dos CSV), e a regra de "gêmeo" só ignorava o CSV de mesmo nome e carimbo, de modo que o resto era contado de novo. Agora o CSV diário manda: do JSON entram só as linhas de concessionárias sem CSV diário vigente (comparação pelo nome normalizado, lido do início de cada CSV), e um JSON inteiramente coberto aparece no `inventory()` como `gemeo`. O CSV de mesmo nome e carimbo do JSON deixa de ser tratado como gêmeo dele (no bruto real é outro recurso, a Via040).
+
+### Como reconverter
+Estas correções mudam a chave do Parquet dos arquivos de nome nu (sufixo `_<id8>` do recurso), acrescentam a coluna `granularidade` a três datasets e tiram do `volume-sat` as linhas do JSON. O `LakeWriter` só remove Parquets órfãos de uma mesma chave de arquivo, então reconverter por cima (mesmo com `--force`) deixaria os Parquets antigos ao lado dos novos e duplicaria linhas. **Antes de reconverter com esta versão, apague no lake** as pastas abaixo e converta de novo (`antt/` é a pasta da fonte no lake):
+
+- `antt/volume-trafego-praca-pedagio/`, `antt/volume-radar/`, `antt/volume-sat/`: coluna nova `granularidade` e chaves novas dos arquivos de nome nu; no `volume-sat`, também o Parquet antigo do JSON (`volume-sat.parquet`), cujas linhas agora vêm dos CSV.
+- `antt/rntrc/`, `antt/ciot/`, `antt/monitriip-servico-regular-paradas/`, `antt/acidentes-rodovias/`, `antt/quantidade-possiveis-infratores/`: o Parquet antigo do arquivo de nome nu (`<dataset>.parquet`) ganha chave nova (`<dataset>_<id8>.parquet`) e os meses, anos e concessionárias que estavam de fora passam a entrar.
+- `antt/investimentos/`, `antt/vale-pedagio-obrigatorio/`, `antt/praca-de-pedagio/`: o único arquivo de cada um tem nome nu e ganha o sufixo `_<id8>` na chave.
+- `antt/relatorio-acompanhamento-acidentes-ferroviarios-raaf/`: dataset novo; se alguém converteu os arquivos à mão com outro id, apague a pasta que tenha criado.
+
+Para não reconverter o que não mudou nos cinco datasets do segundo item (o `monitriip-servico-regular-paradas` e o `rntrc` são os grandes), basta apagar os Parquets cuja chave é só o nome do dataset: `antt/<dataset>/ano=*/<dataset>.parquet` e `<dataset>-NNN.parquet`; os Parquets de arquivos com chave de recurso mantêm a chave e são pulados. Nos demais, apague a pasta inteira.
 
 ## [0.3.2] - 2026-11-06
 

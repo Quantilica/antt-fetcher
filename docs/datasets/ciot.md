@@ -55,13 +55,13 @@ Quantidade mensal de Códigos Identificadores da Operação de Transporte (CIOT)
 
 - O fetcher baixa os CSV do pacote `ciot` (`https://dados.antt.gov.br/dataset/ciot`): um recurso por mês desde janeiro de 2020 (81 CSV, mais 79 JSON que o conversor não lê).
 - No bruto: `ciot_<mês><ano>---ciots-<id>@AAAAMMDD.csv`; os arquivos antigos têm o nome nu `ciot@AAAAMMDD.csv`.
-- Conferido em 2026-11-10 pela listagem do bruto: 81 arquivos, 57 vigentes (537 MB): 12 meses em cada ano de 2020 a 2023, 7 em 2024, 1 em 2025 e 1 em 2026; 4 manifestos sem arquivo no bruto conferido.
+- Conferido em 2026-11-10 pela listagem do bruto: 81 arquivos (861 MB). Os manifestos cobrem 81 meses, de 01/2020 a 09/2026, cada um uma URL diferente; 77 têm o arquivo (os meses 03/2024, 08/2024, 10/2024 e 01/2025 têm manifesto e não têm arquivo no bruto conferido) e 4 arquivos de nome nu (`ciot@20241002`, `@20241121`, `@20241219` e `@20250311`) estão sem manifesto. São vigentes os 77 meses com manifesto e, dos 4 sem manifesto, só o mais recente (regra do nome; veja os cuidados de uso).
 
 ## Conteúdo
 
 - Unidade de análise: a agregação mensal por município de origem, município de destino e NCM. Chave não verificada.
-- Cobertura anunciada pela fonte: mensal. O que o lake tem: janeiro de 2020 a dezembro de 2023, sete meses de 2024 e um de 2025 e de 2026 (veja os cuidados de uso).
-- Layout: 8 colunas, igual nos 4 arquivos abertos (janeiro a maio de 2020).
+- Cobertura anunciada pela fonte: mensal. O que o lake tem: os 77 meses com arquivo e manifesto, de 01/2020 a 09/2026 (veja os cuidados de uso).
+- Layout: 8 colunas, igual nos 78 arquivos vigentes (cabeçalho conferido nos 78; os 4 arquivos de amostra, de janeiro a maio de 2020, foram abertos inteiros).
 - Nulos (amostra de 525.037 linhas de 4 arquivos): nenhum. `ncm_carga` tem 1.107 valores distintos, de `00.01` a `97.06`.
 
 ## Variáveis
@@ -81,15 +81,15 @@ Descrições do dicionário de dados da ANTT ("Dicionário de Dados - Ciot"). To
 
 ## No lake
 
-- Dataset `antt/ciot`, particionado por `ano`, um Parquet por arquivo. É um dataset de fotografia (`SNAPSHOT_DATASETS`): o `ano` vem do período no nome do arquivo ou da URL do manifesto (`01_2020_ciots.csv` dá 2020), sem coluna de data; sem período no nome e sem manifesto a conversão falha.
+- Dataset `antt/ciot`, particionado por `ano`, um Parquet por arquivo (um por mês). O nome do Parquet de um arquivo de nome nu é `ciot_<id8>.parquet`, em que `<id8>` são os 8 primeiros caracteres do id do recurso na URL do manifesto; os de nome com chave mantêm a chave do nome. É um dataset de fotografia (`SNAPSHOT_DATASETS`): o `ano` vem do período no nome do arquivo ou da URL do manifesto (`01_2020_ciots.csv` dá 2020), sem coluna de data; sem período no nome e sem manifesto a conversão falha.
 - Todas as colunas são texto.
-- Esquema de referência (`ciot.schema.json`): 8 colunas, gerado de 4 arquivos de amostra (janeiro a maio de 2020).
+- Esquema de referência (`ciot.schema.json`): 8 colunas, gerado de 4 arquivos de amostra (janeiro a maio de 2020); o cabeçalho dos 78 arquivos vigentes tem as mesmas 8.
 
 ## Cuidados de uso
 
-- **Arquivos de meses ou anos diferentes colidem no nome e só o mais recente é convertido.** O bruto tem arquivos com nome nu (`ciot@AAAAMMDD.csv`), gravados por versões antigas do fetcher que davam o mesmo nome a recursos diferentes do pacote, ao lado dos arquivos com chave de recurso (`ciot_<recurso>-<id>@AAAAMMDD.csv`). `select_current` agrupa por nome sem a data e fica só com o mais novo de cada nome; os outros nomes nus ficam de fora do lake. Aqui, 20 dos 81 arquivos do bruto têm conteúdo (URL e hash) ausente do conjunto vigente: meses de 2026 gravados com nome nu (`ciot@20260410` a `ciot@20260910`, por exemplo março a agosto de 2026).
+- **Nomes nus de meses diferentes.** O bruto tem arquivos de nome nu (`ciot@AAAAMMDD.csv`), gravados por versões antigas do fetcher que davam o mesmo nome a recursos diferentes do pacote (aqui, meses de 2026 como `ciot@20260410` a `ciot@20260910`). A versão vigente é escolhida por recurso (URL do manifesto ao lado), então os meses de nome nu com manifesto entram todos, cada um no seu Parquet. Um arquivo de nome nu **sem** manifesto ao lado não tem período conhecido: se for o mais recente do nome, a conversão falha pedindo o manifesto (é o caso de `ciot@20250311.csv`, a menos que seja cópia de um arquivo com chave de mesmo carimbo, tamanho e hash); os mais antigos são superados pela regra do nome.
 - **Manifestos sem arquivo.** Quatro manifestos do pacote não têm o CSV no bruto conferido.
-- **Mês não está numa coluna.** O mês só existe no nome do arquivo e na URL do manifesto; o lake guarda apenas o ano. Para somar por mês, o caminho do Parquet é o único rastro, e só enquanto cada mês for um arquivo.
+- **Mês não está numa coluna.** O mês só existe no nome do arquivo e na URL do manifesto; o lake guarda apenas o ano. Cada mês é um Parquet (agora todos os meses com arquivo, 12 por ano), e o caminho do Parquet é o único rastro do mês: somar a partição `ano` junta os meses do ano, o que só serve se for isso que se quer.
 - **NCM com ponto.** `ncm_carga` vem como `72.04`, não como 4 dígitos corridos.
 
 ## Exemplos

@@ -1,7 +1,7 @@
 {
   "fonte": "antt",
   "dataset": "volume-radar",
-  "gerado_em": "2026-11-10T14:17:38+00:00",
+  "gerado_em": "2026-11-10T14:54:55+00:00",
   "particoes": [
     "ano"
   ],
@@ -95,7 +95,13 @@
       "tipos": [
         "large_string"
       ]
+    },
+    {
+      "nome": "granularidade",
+      "tipos": [
+        "large_string"
+      ]
     }
   ],
-  "arquivos": 7
+  "arquivos": 10
 }

@@ -55,13 +55,13 @@ Registros de acidentes informados pelas concessionárias de rodovias federais à
 
 - O fetcher baixa os CSV do pacote `acidentes-rodovias` do portal de dados abertos da ANTT (`https://dados.antt.gov.br/dataset/acidentes-rodovias`): um recurso por concessionária (44 CSV), mais o dicionário de dados e o painel.
 - No bruto: `acidentes-rodovias_<recurso>-<id>@AAAAMMDD.csv` (data da última modificação na fonte); alguns arquivos antigos têm o nome nu `acidentes-rodovias@AAAAMMDD.csv`.
-- Conferido em 2026-11-10 pela listagem do bruto: 44 arquivos de dados, 41 vigentes pela regra do arquivo mais recente; 2 manifestos (`nova-rota`, `elovias` entre outros) sem arquivo no bruto conferido.
+- Conferido em 2026-11-10 pela listagem do bruto: 44 arquivos de dados (133 MB), 43 vigentes, um por recurso (o que fica de fora é um arquivo de nome nu sem manifesto, superado pela regra do nome); 2 manifestos (`nova-rota`, `elovias` entre outros) sem arquivo no bruto conferido.
 
 ## Conteúdo
 
 - Unidade de análise: uma ocorrência de uma concessionária. Chave não verificada (o `n_da_ocorrencia` é controle da concessionária, não único entre elas).
 - Cobertura: as partições vão de 2015 a 2026 (amostra de 6 arquivos; 2015 é o ano mais antigo visto, o resto da cobertura depende do arquivo de cada concessionária).
-- Layout: 24 colunas em quase todos os arquivos; um arquivo de nome nu (`@20260628`) tem 23, sem `tipo_de_pista`. Nenhuma outra quebra foi vista.
+- Layout: 24 colunas em quase todos os arquivos; dois arquivos de nome nu (`@20251128` e `@20260628`) têm 23, sem `tipo_de_pista`. Nenhuma outra quebra foi vista (cabeçalho conferido nos 43 vigentes).
 - Nulos (amostra de 14.854 linhas de 6 arquivos): `tipo_de_pista` é nulo em 28,2% (os arquivos que a trazem em branco) e `sentido` em 1 linha; os demais campos não têm nulo. Sem perda de linhas: o lake tem as linhas dos CSV menos o cabeçalho.
 
 ## Variáveis
@@ -97,14 +97,14 @@ Descrições do dicionário de dados da ANTT ("Dicionário de Dados - Acidentes"
 
 ## No lake
 
-- Dataset `antt/acidentes-rodovias`, particionado por `ano`, um Parquet por arquivo de origem.
+- Dataset `antt/acidentes-rodovias`, particionado por `ano`, um Parquet por arquivo de origem (um por concessionária). O nome do Parquet de um arquivo de nome nu é `acidentes-rodovias_<id8>.parquet`, em que `<id8>` são os 8 primeiros caracteres do id do recurso na URL do manifesto; os de nome com chave mantêm a chave do nome.
 - `ano` vem de `data` (grupo de 4 dígitos). Data com ano de 2 dígitos (o dicionário fala em `DD/MM/AA`) não gera ano e a linha iria para a partição `__HIVE_DEFAULT_PARTITION__`; não houve nas amostras.
 - Todas as colunas são texto; arquivos com aspas internas soltas são reparados (`"barreira ou "submarino"`), com aviso no log.
 - Esquema de referência (`acidentes-rodovias.schema.json`): 24 colunas, gerado de 6 arquivos de amostra.
 
 ## Cuidados de uso
 
-- **Arquivos de meses ou anos diferentes colidem no nome e só o mais recente é convertido.** O bruto tem arquivos com nome nu (`acidentes-rodovias@AAAAMMDD.csv`), gravados por versões antigas do fetcher que davam o mesmo nome a recursos diferentes do pacote, ao lado dos arquivos com chave de recurso (`acidentes-rodovias_<recurso>-<id>@AAAAMMDD.csv`). `select_current` agrupa por nome sem a data e fica só com o mais novo de cada nome; os outros nomes nus ficam de fora do lake. Aqui, 1 arquivo de nome nu (`acidentes-rodovias@20251128.csv`, recurso `demostrativo_acidentes_eco101.csv`, 5,7 MB) tem conteúdo ausente do conjunto vigente.
+- **Recursos de nome nu se somam aos demais.** O bruto tem arquivos de nome nu (`acidentes-rodovias@AAAAMMDD.csv`), gravados por versões antigas do fetcher que davam o mesmo nome a recursos diferentes do pacote (aqui, `@20251128` é o recurso `demostrativo_acidentes_eco101.csv`, 5,7 MB, e `@20260628` o `demostrativo_acidentes_viamineira.csv`). A versão vigente é escolhida por recurso (URL do manifesto ao lado), então os dois entram, cada um no seu Parquet (`acidentes-rodovias_<id8>.parquet` para os de nome nu). Um arquivo de nome nu sem manifesto ao lado segue a regra do nome (só o mais recente de cada nome); no bruto conferido, `acidentes-rodovias@20260928.csv` está nesse caso.
 - **Manifestos sem arquivo.** Dois manifestos do pacote não têm o CSV correspondente no bruto conferido (Nova Rota do Oeste, entre outros).
 - **Valores livres entre concessionárias.** `tipo_de_ocorrencia`, `trecho`, `km` e `sentido` não seguem um padrão comum (códigos `AC03 - ...`, `N04`, `334,5`); normalize antes de agregar entre concessionárias.
 - **Dicionário diverge dos dados.** O dicionário diz `DD/MM/AA` para `data` e os arquivos trazem ano de 4 dígitos; `tipo_de_pista` existe nos arquivos e não no dicionário.

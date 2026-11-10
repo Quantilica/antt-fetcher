@@ -12,7 +12,7 @@ dataset:
   unidade: "um transportador inscrito no RNTRC, na data do arquivo mensal"
   granularidade: {espacial: "município do transportador (com UF e CEP)", temporal: "instantâneo mensal (um arquivo por mês)"}
   formato_bruto: "CSV (cada recurso do pacote é um arquivo), Windows-1252 na maior parte (alguns UTF-8), separador ponto e vírgula, texto entre aspas só em parte dos arquivos; campos entre aspas, com aspas simples duplas no nome em alguns casos"
-  lake: {estado: convertido, particoes: ["ano"], chave: ["ano", "numero_rntrc"], colunas: 11}
+  lake: {estado: convertido, particoes: ["ano"], chave: ["ano", "numero_rntrc"], colunas: 12}
   unidades_de_medida: null
   dados_pessoais:
     - {coluna: "nome_transportador", categoria: "nome (pessoa física no caso de TAC)"}
@@ -21,7 +21,8 @@ dataset:
     - {coluna: "municipio", categoria: "endereço (município)"}
     - {coluna: "uf", categoria: "endereço (UF)"}
     - {coluna: "numero_rntrc", categoria: "identificador do transportador"}
-  eras: []
+  eras:
+    - {desde: "2024-05", mudanca: "o layout passa de 5 para 11 colunas: saem `validade_rntrc` e ficam `nome_transportador`, `numero_rntrc`, `data_primeiro_cadastro` e `situacao_rntrc`; entram `cpfcnpjtransportador`, `categoria_transportador`, `cep`, `municipio`, `uf`, `equiparado` e `data_situacao_rntrc`"}
   revisado_em: 2026-11-10
   versao_fetcher: 0.3.2
 ---
@@ -50,10 +51,10 @@ Fotografia mensal do Registro Nacional de Transportadores Rodoviários de Cargas
 | Estado no lake | convertido |
 | Partições | `ano` |
 | Chave | `ano`, `numero_rntrc` |
-| Colunas | 11 |
+| Colunas | 12 |
 | Unidades de medida | — |
 | Dados pessoais | `nome_transportador` (nome (pessoa física no caso de TAC)); `cpfcnpjtransportador` (CPF mascarado ou CNPJ); `cep` (endereço (CEP)); `municipio` (endereço (município)); `uf` (endereço (UF)); `numero_rntrc` (identificador do transportador) |
-| Eras | nenhuma |
+| Eras | 2024-05: o layout passa de 5 para 11 colunas: saem `validade_rntrc` e ficam `nome_transportador`, `numero_rntrc`, `data_primeiro_cadastro` e `situacao_rntrc`; entram `cpfcnpjtransportador`, `categoria_transportador`, `cep`, `municipio`, `uf`, `equiparado` e `data_situacao_rntrc` |
 | Revisado em | 2026-11-10 |
 | Versão do fetcher | 0.3.2 |
 
@@ -61,14 +62,14 @@ Fotografia mensal do Registro Nacional de Transportadores Rodoviários de Cargas
 
 - O fetcher baixa os CSV mensais do pacote `rntrc` (`https://dados.antt.gov.br/dataset/rntrc`), que tem um recurso `transportadores_rntrc_MM_AAAA.csv` por mês desde agosto de 2020 (73 CSV).
 - No bruto o nome é `rntrc@AAAAMMDD.csv` (data da última modificação na fonte), com manifesto ao lado que guarda a URL de origem.
-- Conferido em 2026-11-10 pela listagem do bruto: 71 arquivos, todos com o mesmo nome nu; só o mais recente é vigente (`rntrc@20261010.csv`, que é o recurso `transportadores_rntrc_09_2026.csv`, 163 MB).
+- Conferido em 2026-11-10 pela listagem do bruto: 71 arquivos, todos com o mesmo nome nu (`rntrc@AAAAMMDD.csv`) e todos de recursos diferentes: 71 URLs distintas de `transportadores_rntrc_MM_AAAA.csv`, de 08/2020 a 09/2026, sem os meses 11/2022, 07/2024 e 02/2025 (6,7 GB). Cada um é um mês, não uma versão do outro, e os 71 são vigentes (o mais recente é `rntrc@20261010.csv`, o recurso de 09/2026, 163 MB).
 
 ## Conteúdo
 
 - Unidade de análise: um transportador (`numero_rntrc` é único no arquivo conferido: 1.189.325 distintos em 1.189.325 linhas).
-- Cobertura anunciada pela fonte: agosto de 2020 em diante, mensal. O que chega ao lake: **só o instantâneo de setembro de 2026**, com `ano=2026` (veja os cuidados de uso).
-- Layout: 11 colunas, sem quebra conhecida (só um arquivo foi aberto).
-- Nulos (arquivo vigente inteiro, 1.189.325 linhas): `municipio` e `uf` nulos em 127 linhas; nenhum outro campo nulo. `cep` tem 354 valores de 1 caractere (vazios na prática). 912.543 `ATIVO` e 276.782 `PENDENTE`.
+- Cobertura anunciada pela fonte: agosto de 2020 em diante, mensal. O que chega ao lake: as **71 fotografias mensais** de 08/2020 a 09/2026, cada uma no `ano` do seu mês (veja os cuidados de uso).
+- Layout: 5 colunas (`nome_transportador`, `numero_rntrc`, `data_primeiro_cadastro`, `validade_rntrc`, `situacao_rntrc`) nos 44 arquivos de 08/2020 a 04/2024 e 11 colunas nos 27 de 05/2024 em diante (conferido pelo cabeçalho dos 71 arquivos); o lake tem a união, 12 colunas.
+- Nulos (arquivo de setembro de 2026 inteiro, 1.189.325 linhas; os arquivos até 04/2024 não têm essas colunas): `municipio` e `uf` nulos em 127 linhas; nenhum outro campo nulo. `cep` tem 354 valores de 1 caractere (vazios na prática). 912.543 `ATIVO` e 276.782 `PENDENTE`.
 
 ## Variáveis
 
@@ -79,37 +80,39 @@ Descrições do dicionário de dados da ANTT ("Dicionário de Dados - RNTRC", cu
 | `nome_transportador` | `nome_transportador` | texto | Nome do transportador | — | todo |
 | `numero_rntrc` | `numero_rntrc` | texto | Número do RNTRC do transportador | 9 dígitos; único no arquivo conferido | todo |
 | `data_primeiro_cadastro` | `data_primeiro_cadastro` | texto | Data em que o transportador efetuou o primeiro cadastro no RNTRC | `dd/mm/aaaa` | todo |
+| `validade_rntrc` | `validade_rntrc` | texto | Data de validade do RNTRC (pelo nome da coluna; não consta do dicionário de 11 colunas conferido) | `dd/mm/aaaa` | até 04/2024 |
 | `situacao_rntrc` | `situacao_rntrc` | texto | Situação do RNTRC (ex.: Ativo, Pendente) | `ATIVO`, `PENDENTE` (conferido) | todo |
-| `cpfcnpjtransportador` | `cpfcnpjtransportador` | texto | Número de inscrição no CPF (anonimizado, segundo o dicionário) ou no CNPJ do transportador | CNPJ completo (`99.999.999/9999-99`) ou CPF mascarado (`999.***.***-99`) | todo |
-| `categoria_transportador` | `categoria_transportador` | texto | Categoria do transportador | `ETC` Empresa de Transporte Rodoviário de Cargas; `CTC` Cooperativa de Transporte Rodoviário de Cargas; `TAC` Transportador Autônomo de Cargas | todo |
-| `cep` | `cep` | texto | Código postal | `99999-999` | todo |
-| `municipio` | `municipio` | texto | Nome do município | — | todo |
-| `uf` | `uf` | texto | Sigla da unidade federativa | sigla de 2 letras | todo |
-| `equiparado` | `equiparado` | texto | Transportador ETC com até 3 veículos automotores na frota | `Sim`, `Não` (o dicionário diz `SIM`/`NÃO`) | todo |
-| `data_situacao_rntrc` | `data_situacao_rntrc` | texto | Data da última atualização da situação no RNTRC | `dd/mm/aaaa` | todo |
+| `cpfcnpjtransportador` | `cpfcnpjtransportador` | texto | Número de inscrição no CPF (anonimizado, segundo o dicionário) ou no CNPJ do transportador | CNPJ completo (`99.999.999/9999-99`) ou CPF mascarado (`999.***.***-99`) | 05/2024 em diante |
+| `categoria_transportador` | `categoria_transportador` | texto | Categoria do transportador | `ETC` Empresa de Transporte Rodoviário de Cargas; `CTC` Cooperativa de Transporte Rodoviário de Cargas; `TAC` Transportador Autônomo de Cargas | 05/2024 em diante |
+| `cep` | `cep` | texto | Código postal | `99999-999` | 05/2024 em diante |
+| `municipio` | `municipio` | texto | Nome do município | — | 05/2024 em diante |
+| `uf` | `uf` | texto | Sigla da unidade federativa | sigla de 2 letras | 05/2024 em diante |
+| `equiparado` | `equiparado` | texto | Transportador ETC com até 3 veículos automotores na frota | `Sim`, `Não` (o dicionário diz `SIM`/`NÃO`) | 05/2024 em diante |
+| `data_situacao_rntrc` | `data_situacao_rntrc` | texto | Data da última atualização da situação no RNTRC | `dd/mm/aaaa` | 05/2024 em diante |
 
 ## No lake
 
-- Dataset `antt/rntrc`, particionado por `ano`, um Parquet por arquivo de origem.
+- Dataset `antt/rntrc`, particionado por `ano`, um Parquet por arquivo de origem (um por mês). O nome do Parquet é `rntrc_<id8>.parquet`, em que `<id8>` são os 8 primeiros caracteres do id do recurso na URL do manifesto (por exemplo `rntrc_c77e6837.parquet` para setembro de 2026).
 - Dataset de fotografia (`SNAPSHOT_DATASETS`): o `ano` vem do período no nome original do recurso na URL do manifesto (`transportadores_rntrc_09_2026.csv` dá 2026), não de uma coluna. Sem manifesto, a conversão falha em vez de inventar o ano.
 - Todas as colunas são texto. Arquivos sem campos entre aspas no início são lidos sem aspas; aspas soltas no dado (`D"AVILA`) são reparadas.
-- Esquema de referência (`rntrc.schema.json`): 11 colunas, gerado da conversão do arquivo vigente inteiro.
+- Esquema de referência (`rntrc.schema.json`): 12 colunas, gerado da conversão do cabeçalho e das primeiras linhas dos 71 arquivos (os dois layouts); o arquivo de setembro de 2026 foi convertido inteiro à parte.
 
 ## Cuidados de uso
 
-- **Arquivos de meses ou anos diferentes colidem no nome e só o mais recente é convertido.** O bruto tem arquivos com nome nu (`rntrc@AAAAMMDD.csv`), gravados por versões antigas do fetcher que davam o mesmo nome a recursos diferentes do pacote, ao lado dos arquivos com chave de recurso (`rntrc_<recurso>-<id>@AAAAMMDD.csv`). `select_current` agrupa por nome sem a data e fica só com o mais novo de cada nome; os outros nomes nus ficam de fora do lake. Aqui é o caso mais grave: dos 71 arquivos do bruto, só o `rntrc@20261010.csv` vira lake; os outros 70 instantâneos mensais (de agosto de 2020 a agosto de 2026) têm conteúdo (URL e hash) que não está no conjunto vigente. O lake tem uma só fotografia e `ano=2026`, e não a série mensal que a partição `ano` sugere.
+- **Uma fotografia por mês, sem coluna de mês.** Cada Parquet é o retrato de um mês inteiro e o `ano` da partição vem do período do arquivo (não de uma coluna), então uma partição `ano` reúne até 12 retratos do mesmo universo de transportadores: um transportador aparece uma vez por mês, e somar ou contar a partição inteira conta cada um várias vezes. O mês só aparece no arquivo de origem (nome do Parquet e metadados do arquivo), não como coluna: para uma fotografia só, leia um Parquet (`rntrc_<id8>.parquet`) e não a partição.
+- **Meses ausentes e arquivos pequenos.** Faltam no pacote os meses 11/2022, 07/2024 e 02/2025. O recurso de 08/2023 tem só o cabeçalho (85 bytes, nenhuma linha, então não gera Parquet) e o de 07/2022 tem 10 MB, contra 75 a 78 MB nos vizinhos (conteúdo não investigado).
 - **Dado pessoal.** `nome_transportador` é o nome da pessoa física quando a categoria é `TAC`, e o CPF vem mascarado (`999.***.***-99`; 846.664 linhas), mas nome, CEP e município juntos identificam a pessoa. Nove linhas `TAC` têm CNPJ truncado (`99.999.999/999 -`).
 - **Situação `PENDENTE`.** 23% dos registros (276.782) estão pendentes; filtre `situacao_rntrc = "ATIVO"` para transportadores ativos.
 - **Texto do nome.** Há nomes com aspas simples duplicadas (`'' DPS LOGISTICA LTDA ''`).
 
 ## Exemplos
 
-Transportadores ativos por categoria e UF no instantâneo de setembro de 2026:
+Transportadores ativos por categoria e UF no instantâneo de setembro de 2026 (um Parquet, não a partição inteira):
 
 ```python
 import polars as pl
 
-r = pl.scan_parquet("lake/antt/rntrc/ano=2026/*.parquet")
+r = pl.scan_parquet("lake/antt/rntrc/ano=2026/rntrc_c77e6837.parquet")
 resumo = (
     r.filter(pl.col("situacao_rntrc") == "ATIVO")
     .group_by("categoria_transportador", "uf")

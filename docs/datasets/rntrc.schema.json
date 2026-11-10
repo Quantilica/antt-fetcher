@@ -1,7 +1,7 @@
 {
   "fonte": "antt",
   "dataset": "rntrc",
-  "gerado_em": "2026-11-10T14:17:38+00:00",
+  "gerado_em": "2026-11-10T15:03:45+00:00",
   "particoes": [
     "ano"
   ],
@@ -20,6 +20,12 @@
     },
     {
       "nome": "data_primeiro_cadastro",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
+      "nome": "validade_rntrc",
       "tipos": [
         "large_string"
       ]
@@ -73,5 +79,5 @@
       ]
     }
   ],
-  "arquivos": 1
+  "arquivos": 70
 }

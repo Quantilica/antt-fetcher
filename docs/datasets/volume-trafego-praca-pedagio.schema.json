@@ -1,7 +1,7 @@
 {
   "fonte": "antt",
   "dataset": "volume-trafego-praca-pedagio",
-  "gerado_em": "2026-11-10T14:17:38+00:00",
+  "gerado_em": "2026-11-10T14:54:55+00:00",
   "particoes": [
     "ano"
   ],
@@ -55,11 +55,17 @@
       ]
     },
     {
+      "nome": "granularidade",
+      "tipos": [
+        "large_string"
+      ]
+    },
+    {
       "nome": "categoria_eixo",
       "tipos": [
         "large_string"
       ]
     }
   ],
-  "arquivos": 5
+  "arquivos": 6
 }

@@ -54,12 +54,12 @@ Quantidade de possíveis infratores por excesso de velocidade nos radares de con
 ## Origem e coleta
 
 - O fetcher baixa os CSV do pacote `quantidade-possiveis-infratores` (`https://dados.antt.gov.br/dataset/quantidade-possiveis-infratores`): um recurso por concessionária (21 CSV e 21 JSON).
-- No bruto: `quantidade-possiveis-infratores_<recurso>-<id>@AAAAMMDD.csv`; arquivos antigos têm o nome nu. Conferido em 2026-11-10 pela listagem do bruto: 18 arquivos, 10 vigentes (149 MB); 5 manifestos sem arquivo no bruto conferido.
+- No bruto: `quantidade-possiveis-infratores_<recurso>-<id>@AAAAMMDD.csv`; arquivos antigos têm o nome nu. Conferido em 2026-11-10 pela listagem do bruto: 18 arquivos (254 MB), todos de recursos diferentes e vigentes; 5 manifestos sem arquivo no bruto conferido.
 
 ## Conteúdo
 
 - Unidade de análise: uma contagem diária por equipamento, sentido, faixa, faixa de velocidade e tipo de veículo. Chave não verificada.
-- Cobertura anunciada pela fonte: a partir de 2022, mensal. O que veio: partições 2022, 2024, 2025 e 2026 na amostra de 3 arquivos (Via Cristais, Concebra e Transbrasiliana), pelos 10 arquivos vigentes.
+- Cobertura anunciada pela fonte: a partir de 2022, mensal. O que veio: partições 2022, 2024, 2025 e 2026 na amostra de 3 arquivos (Via Cristais, Concebra e Transbrasiliana), pelos arquivos vigentes.
 - Layout: 15 colunas em todos os arquivos conferidos.
 - Nulos (amostra de 20.493 linhas de 3 arquivos): nenhum.
 
@@ -94,8 +94,8 @@ Descrições do dicionário de dados da ANTT ("Dicionário de Dados - Quantidade
 
 ## Cuidados de uso
 
-- **Arquivos de meses ou anos diferentes colidem no nome e só o mais recente é convertido.** O bruto tem arquivos com nome nu (`quantidade-possiveis-infratores@AAAAMMDD.csv`), gravados por versões antigas do fetcher que davam o mesmo nome a recursos diferentes do pacote, ao lado dos arquivos com chave de recurso (`quantidade-possiveis-infratores_<recurso>-<id>@AAAAMMDD.csv`). `select_current` agrupa por nome sem a data e fica só com o mais novo de cada nome; os outros nomes nus ficam de fora do lake. Aqui, 6 dos 22 arquivos do bruto têm conteúdo (URL e hash) ausente do conjunto vigente (recursos de Eco050, Rodovia do Aço, Autopista Fluminense, MS Via, Eco101 e Ecoponte).
-- **Cópia sob dois nomes.** `quantidade-possiveis-infratores@20260828.csv` e o recurso `...aut-ae4f9bef@20260828` têm o mesmo hash; a regra de versão mantém os dois nomes, o que repetiria as linhas se ambos fossem vigentes.
+- **Recursos de nome nu se somam aos demais.** O bruto tem arquivos de nome nu (`quantidade-possiveis-infratores@AAAAMMDD.csv`), gravados por versões antigas do fetcher que davam o mesmo nome a recursos diferentes do pacote (Eco050, Rodovia do Aço, Autopista Fluminense, MS Via, Eco101 e Ecoponte, entre outros). A versão vigente é escolhida por recurso (URL do manifesto ao lado), então todos entram, cada um no seu Parquet (`quantidade-possiveis-infratores_<id8>.parquet` para os de nome nu). Um arquivo de nome nu sem manifesto ao lado segue a regra do nome (só o mais recente de cada nome).
+- **Cópia sob dois nomes.** `quantidade-possiveis-infratores@20260828.csv` (Autopista Fluminense) e o recurso `...aut-ae4f9bef@20260828` têm a mesma URL e o mesmo hash. O conversor trata como um só: entra o de nome com chave, e o de nome nu aparece como `gemeo` no `inventory()`. O mesmo vale, sem manifesto, para um arquivo de nome nu de mesmo carimbo, tamanho e `sha256` de um de nome com chave. No bruto conferido o arquivo de nome com chave dessa cópia tem só o manifesto, e então o de nome nu é o que entra.
 - **Manifestos sem arquivo.** Cinco manifestos do pacote não têm o CSV no bruto conferido.
 - **Velocidade é faixa.** `velocidade` traz faixas como `81 - 100 KM/h`, não a velocidade medida.
 

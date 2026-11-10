@@ -79,7 +79,7 @@ Cabeçalhos do CSV (sem dicionário da fonte): onde a coluna não é definida pe
 
 ## No lake
 
-- Dataset `antt/vale-pedagio-obrigatorio`, particionado por `ano` (de `ano_de_emissao`, partições 2025 e 2026), um Parquet por ano e arquivo.
+- Dataset `antt/vale-pedagio-obrigatorio`, particionado por `ano` (de `ano_de_emissao`, partições 2025 e 2026), um Parquet por ano e arquivo (`vale-pedagio-obrigatorio_<id8>.parquet`, em que `<id8>` são os 8 primeiros caracteres do id do recurso na URL do manifesto, porque o arquivo tem nome nu).
 - Todas as colunas são texto. Os nomes viram `ano_de_emissao`, `mes_de_emissao`, `no_de_transportadores`, `no_de_veiculos`, `no_de_vpos` e `valor_dos_vpos` (o símbolo "º" some na normalização).
 - A coluna `ano_de_emissao` está nos dados e na partição `ano`.
 - Esquema de referência (`vale-pedagio-obrigatorio.schema.json`): 8 colunas, gerado da conversão do arquivo inteiro.

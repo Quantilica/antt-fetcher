@@ -74,7 +74,7 @@ Descrições do dicionário de dados da ANTT ("Dicionário de Dados - Investimen
 
 ## No lake
 
-- Dataset `antt/investimentos`, particionado por `ano` (da coluna `ano` do CSV, que é removida dos dados), um Parquet por ano.
+- Dataset `antt/investimentos`, particionado por `ano` (da coluna `ano` do CSV, que é removida dos dados), um Parquet por ano (`investimentos_<id8>.parquet`, em que `<id8>` são os 8 primeiros caracteres do id do recurso na URL do manifesto, porque o arquivo tem nome nu).
 - Todas as colunas são texto.
 - Esquema de referência (`investimentos.schema.json`): 2 colunas, gerado da conversão do arquivo inteiro.
 

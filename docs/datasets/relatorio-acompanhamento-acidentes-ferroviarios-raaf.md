@@ -12,7 +12,7 @@ dataset:
   unidade: "um acidente ferroviário (tabela de acidentes) ou o índice anual de uma concessionária (tabela de índice)"
   granularidade: {espacial: "linha ferroviária, município e UF", temporal: "ocorrência (data e hora); ano no índice"}
   formato_bruto: "CSV, Windows-1252, separador ponto e vírgula, campos de texto entre aspas e números sem aspas"
-  lake: {estado: so-bruto, particoes: ["ano"], chave: [], colunas: null}
+  lake: {estado: convertido, particoes: ["ano"], chave: [], colunas: 28}
   unidades_de_medida: null
   dados_pessoais: nenhum
   eras:
@@ -25,7 +25,7 @@ dataset:
 
 ## Resumo
 
-Registros de acidentes ocorridos nos trechos concedidos às operadoras ferroviárias, com o processo de monitoramento e análise do Sistema de Acompanhamento de Fiscalização do Transporte Ferroviário (SAFF), mais o índice anual de acidentes por milhão de trem-km. **O conversor declara este dataset, mas hoje nenhuma linha chega ao lake**: os arquivos do bruto usam o slug do pacote (`relatorio-de-acompanhamento-de-acidentes-ferroviarios-raaf`) e o conversor procura outro id (`relatorio-acompanhamento-acidentes-ferroviarios-raaf`).
+Registros de acidentes ocorridos nos trechos concedidos às operadoras ferroviárias, com o processo de monitoramento e análise do Sistema de Acompanhamento de Fiscalização do Transporte Ferroviário (SAFF), mais o índice anual de acidentes por milhão de trem-km. Os arquivos do bruto usam o slug do pacote (`relatorio-de-acompanhamento-de-acidentes-ferroviarios-raaf`) e o dataset do lake tem outro id (`relatorio-acompanhamento-acidentes-ferroviarios-raaf`); o conversor liga um ao outro.
 
 ## Ficha técnica
 
@@ -42,10 +42,10 @@ Registros de acidentes ocorridos nos trechos concedidos às operadoras ferroviá
 | Unidade (uma linha) | um acidente ferroviário (tabela de acidentes) ou o índice anual de uma concessionária (tabela de índice) |
 | Granularidade | espacial: linha ferroviária, município e UF; temporal: ocorrência (data e hora); ano no índice |
 | Formato bruto | CSV, Windows-1252, separador ponto e vírgula, campos de texto entre aspas e números sem aspas |
-| Estado no lake | so-bruto |
+| Estado no lake | convertido |
 | Partições | `ano` |
 | Chave | — |
-| Colunas | — |
+| Colunas | 28 |
 | Unidades de medida | — |
 | Dados pessoais | nenhum |
 | Eras | 2020-12: o layout de acidentes ganha `Quilômetro_Final`, `Causa_contibutiva`, `N_Trem`, `Double_Stack` e `Prejuízo_Financeiro` (27 colunas, antes 22) |
@@ -56,18 +56,18 @@ Registros de acidentes ocorridos nos trechos concedidos às operadoras ferroviá
 
 - O fetcher baixa os recursos CSV do pacote `relatorio-de-acompanhamento-de-acidentes-ferroviarios-raaf` (`https://dados.antt.gov.br/dataset/relatorio-de-acompanhamento-de-acidentes-ferroviarios-raaf`): "Índice de Acidentes Ferroviários de 2006 a 2019" e "Acidentes Ferroviários - Dezembro de 2020 em diante" (5 CSV e 5 JSON no catálogo).
 - No bruto: `relatorio-de-acompanhamento-de-acidentes-ferroviarios-raaf@AAAAMMDD.csv` (nome nu) e `..._<recurso>-<id>@AAAAMMDD.csv`. Conferido em 2026-11-10 pela listagem do bruto: 7 arquivos.
-- O nome nu foi usado por recursos diferentes: `@20231130` (acidentes de 2004 a nov/2020, 22 colunas, 10.824 linhas), `@20250710` e `@20260410` (acidentes de dez/2020 em diante, 27 colunas, 3.305 e 3.710 linhas).
+- No bruto, o nome nu foi usado por recursos diferentes: `@20231130` (acidentes de 2004 a nov/2020, 22 colunas, 10.824 linhas), `@20250710` e `@20260410` (acidentes de dez/2020 em diante, 27 colunas, 3.305 e 3.710 linhas).
 
 ## Conteúdo
 
 - Unidade de análise: um acidente (tabela de acidentes) ou um par concessionária e ano (índice, 182 linhas na versão de julho de 2025). O arquivo de índice de 2026 (`...8f8f2a80@20260410`) tem só o cabeçalho, sem linhas.
 - Cobertura: acidentes de 2004 a nov/2020 no arquivo de 2023 e de dez/2020 em diante nos de 2025 e 2026; índice de 2006 a 2019.
 - Eras: 22 colunas até nov/2020 e 27 a partir de dez/2020 (o dicionário também tem duas versões).
-- Nada foi convertido pelo lake real. Para testar o layout, os arquivos foram copiados com o id esperado pelo conversor, sob outro nome, numa conversão local; mesmo assim só o nome nu mais recente (`@20260410`) é lido (as partições de 2020 a 2026), porque o arquivo de 2004 a 2020 (`@20231130`) tem o mesmo nome nu e é considerado superado.
+- O que chega ao lake (conversão local dos 7 arquivos do bruto, 2026-11-10): 10.824 linhas de acidentes de 2004 a nov/2020 (`@20231130`), 3.305 e 3.710 linhas de acidentes de dez/2020 em diante (os recursos de julho de 2025 e de abril de 2026), 182 linhas do índice de 2006 a 2019 e nenhuma do índice de 2026 (só o cabeçalho). Os nomes nus `@20250710` e `@20260410` são cópias dos recursos com chave de mesmo carimbo e não entram uma segunda vez.
 
 ## Variáveis
 
-Colunas dos CSV do bruto (normalizadas como o conversor faria) e descrições do dicionário de dados da ANTT (dois PDFs de acidentes; o PDF do índice repete o texto do de 2004 a 2020 e não descreve as colunas do índice). O dataset não está no lake, então a tabela não é verificada contra um esquema de referência.
+Colunas dos CSV do bruto (normalizadas como o conversor faria) e descrições do dicionário de dados da ANTT (dois PDFs de acidentes; o PDF do índice repete o texto do de 2004 a 2020 e não descreve as colunas do índice). A tabela é verificada contra o esquema de referência (`relatorio-acompanhamento-acidentes-ferroviarios-raaf.schema.json`).
 
 | Coluna no lake | Na fonte | Tipo | Descrição | Unidade / códigos | Período |
 |---|---|---|---|---|---|
@@ -103,30 +103,36 @@ Colunas dos CSV do bruto (normalizadas como o conversor faria) e descrições do
 
 ## No lake
 
-- Estado: `so-bruto`. Não há dataset `antt/relatorio-acompanhamento-acidentes-ferroviarios-raaf` no lake e não há esquema de referência.
-- Causa: `_detect_dataset_id` devolve `None` para todo nome com slug de pacote do catálogo que não seja um id do lake (`relatorio-de-acompanhamento-de-acidentes-ferroviarios-raaf` está no catálogo e não está em `DATASETS`). O `inventory()` lista os 7 arquivos sem conjunto e sem motivo (lacuna de cobertura).
-- Se os arquivos fossem lidos, o conversor os particionaria por `ano` a partir de `data_ocorrencia`, tudo em texto. Três tabelas de layouts diferentes (22, 27 e 3 colunas) cairiam no mesmo dataset.
+- Dataset `antt/relatorio-acompanhamento-acidentes-ferroviarios-raaf`, particionado por `ano`, um Parquet por arquivo de origem. O `ano` vem de `data_ocorrencia` nas tabelas de acidentes e da coluna `ano` no índice.
+- O id do dataset difere do slug do pacote: o conversor liga o slug do pacote do nome local (`relatorio-de-acompanhamento-de-acidentes-ferroviarios-raaf`) ao id do dataset (`PACKAGE_DATASETS`). Antes dessa ligação o `inventory()` listava os 7 arquivos sem conjunto e nenhuma linha chegava ao lake.
+- Três tabelas de layouts diferentes (22, 27 e 3 colunas) caem no mesmo dataset: o esquema de referência (28 colunas) é a união delas, e cada Parquet tem só as colunas da sua tabela. Tudo é texto.
+- Esquema de referência (`relatorio-acompanhamento-acidentes-ferroviarios-raaf.schema.json`): 28 colunas, gerado da conversão local dos 7 arquivos do bruto.
 
 ## Cuidados de uso
 
-- **Nenhuma linha chega ao lake.** Evidência (versão 0.3.2, 2026-11-10): os 7 arquivos do bruto não têm conjunto no `inventory()`; os mesmos arquivos, renomeados para o id do conversor, geram 7 partições (2020 a 2026) só do arquivo mais novo.
-- **Três tabelas num dataset.** Acidentes até nov/2020, acidentes de dez/2020 em diante e índice teriam esquemas distintos (22, 27 e 3 colunas).
+- **Três tabelas num dataset.** Acidentes até nov/2020 (22 colunas), acidentes de dez/2020 em diante (27) e índice (3, com `ano` como partição) têm esquemas distintos; leia pelo nome do arquivo de origem ou filtre pelas colunas que só uma tabela tem (`indice_de_acidentes_por_milhao_de_trem_km` só no índice; `n_trem` só nos acidentes de dez/2020 em diante).
+- **Versões do mesmo período repetem linhas.** O portal lista juntos "Acidentes Ferroviários - Dezembro de 2020 a Junho de 2025" e "... a Janeiro de 2026", dois recursos distintos em que o segundo contém o primeiro (as partições de 2021 a 2024 têm o mesmo número de linhas nos dois, e 2025 tem 326 contra 687). Os dois são vigentes e entram, cada um no seu Parquet: contar a partição inteira conta os acidentes de dez/2020 a jun/2025 duas vezes; use só o recurso mais novo. O mesmo vale para o índice (recursos de 2025 e de 2026).
+- **Nome nu sem manifesto.** O arquivo de acidentes de 2004 a nov/2020 (`@20231130`) está no bruto conferido sem manifesto; ele só entra porque os outros dois nomes nus sem manifesto são cópias de recursos com chave. Se a cópia deixasse de existir, a regra do nome (só o mais recente de cada nome nu) o descartaria.
 - **Índice vazio em 2026.** O recurso do índice na versão de abril de 2026 tem só o cabeçalho.
 - **Dicionário imperfeito.** O dicionário descreve `Municipio` como "a região geográfica", `Interrupção` como numérica e `Equipagem` como nome do maquinista; nas linhas conferidas `Interrupção` é um número decimal (por exemplo `20.0`) e `Equipagem` vem vazio.
-- **Pessoais.** O campo `Equipagem` seria nome de maquinista segundo o dicionário; vem vazio nas linhas conferidas.
+- **Pessoais.** O campo `equipagem` seria nome de maquinista segundo o dicionário; vem vazio nas linhas conferidas.
 
 ## Exemplos
 
-Ainda não há dados no lake para este dataset. Com o arquivo bruto aberto diretamente, acidentes por concessionária desde dezembro de 2020 (exemplo de leitura do CSV da fonte, não do lake):
+Acidentes por concessionária desde dezembro de 2020, lendo só o recurso mais novo (`..._b3851bf8.parquet`) para não repetir o período coberto pelo recurso anterior:
 
 ```python
 import polars as pl
 
-ac = pl.read_csv(
-    "relatorio-de-acompanhamento-de-acidentes-ferroviarios-raaf@20260410.csv",
-    separator=";", encoding="cp1252", infer_schema=False,
+ac = pl.scan_parquet(
+    "lake/antt/relatorio-acompanhamento-acidentes-ferroviarios-raaf/ano=*/*b3851bf8.parquet"
 )
-resumo = ac.group_by("Concessionaria").agg(pl.len().alias("acidentes")).sort("acidentes", descending=True)
+resumo = (
+    ac.group_by("concessionaria")
+    .agg(pl.len().alias("acidentes"))
+    .sort("acidentes", descending=True)
+    .collect()
+)
 ```
 
 ## Referências

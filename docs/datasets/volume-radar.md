@@ -12,7 +12,7 @@ dataset:
   unidade: "o volume de veículos de um tipo em uma faixa de velocidade, equipamento, sentido e faixa em um dia (arquivos diários) ou mês (mensais consolidados)"
   granularidade: {espacial: "equipamento (radar), com rodovia, km e município", temporal: "dia ou mês"}
   formato_bruto: "CSV por concessionária (parte dos arquivos sem a linha de cabeçalho), separador ponto e vírgula, Windows-1252 ou UTF-8"
-  lake: {estado: convertido, particoes: ["ano"], chave: [], colunas: 15}
+  lake: {estado: convertido, particoes: ["ano"], chave: [], colunas: 16}
   unidades_de_medida: {volume_total: "veículos"}
   dados_pessoais: nenhum
   eras: []
@@ -44,7 +44,7 @@ Tráfego de veículos nos radares de controle de velocidade das concessionárias
 | Estado no lake | convertido |
 | Partições | `ano` |
 | Chave | — |
-| Colunas | 15 |
+| Colunas | 16 |
 | Unidades de medida | `volume_total`: veículos |
 | Dados pessoais | nenhum |
 | Eras | nenhuma |
@@ -54,14 +54,14 @@ Tráfego de veículos nos radares de controle de velocidade das concessionárias
 ## Origem e coleta
 
 - O fetcher baixa os CSV do pacote `volume-radar` (`https://dados.antt.gov.br/dataset/volume-radar`): um recurso por concessionária e por granularidade (44 CSV e 44 JSON, estes não convertidos).
-- No bruto: `volume-radar_<recurso>-<id>@AAAAMMDD.csv`; arquivos antigos têm o nome nu. Conferido em 2026-11-10 pela listagem do bruto: 39 arquivos, 31 vigentes (631 MB); 8 manifestos sem arquivo no bruto conferido.
+- No bruto: `volume-radar_<recurso>-<id>@AAAAMMDD.csv`; arquivos antigos têm o nome nu. Conferido em 2026-11-10 pela listagem do bruto: 39 arquivos (818 MB), 37 vigentes (813 MB), um por recurso; os 2 que ficam de fora são arquivos de nome nu sem manifesto, superados pela regra do nome (`volume-radar@20260228.csv` e `volume-radar@20260728.csv`); 8 manifestos sem arquivo no bruto conferido.
 - Parte dos arquivos foi publicada **sem a linha de cabeçalho** (todos os 5 mensais abertos); o conversor aplica o cabeçalho do dicionário quando a primeira linha tem 15 campos e não é um nome de coluna.
 
 ## Conteúdo
 
 - Unidade de análise: uma contagem por equipamento, período, sentido, faixa, faixa de velocidade e tipo de veículo. Chave não verificada.
 - Cobertura anunciada pela fonte: a partir de 2022, mensal. O que veio nos 5 arquivos mensais abertos: 2022, 2025 e 2026; a cobertura de cada concessionária não foi levantada.
-- Layout: 15 colunas. Os 5 arquivos abertos são mensais consolidados (`mm/aaaa` em `data_da_passagem`) e sem cabeçalho.
+- Layout: 15 colunas na fonte, mais `granularidade` no lake. Os 5 arquivos abertos são mensais consolidados (`mm/aaaa` em `data_da_passagem`) e sem cabeçalho.
 - Nulos (amostra de 5.297 linhas de 5 arquivos): `tipo_de_veiculo` nulo em 960 (18,1%), de uma concessionária que deixa o campo vazio; sem outro nulo. O lake tem exatamente as linhas do CSV, porque não há cabeçalho a descontar.
 
 ## Variáveis
@@ -85,33 +85,35 @@ Descrições do dicionário de dados da ANTT ("Dicionário de Dados - Tráfego d
 | `velocidade` | `velocidade` | texto | Velocidade do veículo em km/h. O dicionário dá o exemplo `80km/h`; os arquivos trazem faixas (`81 - 100 KM/h`, `> 160 KM/h`, `<= 20 KM/h`), não a velocidade medida | faixas em km/h | todo |
 | `tipo_de_veiculo` | `tipo_de_veiculo` | texto | Tipo de veículo | `Moto`, `Veículo leve`, `Veículo pesado`, `Não identificado` (varia entre arquivos: `Passeio`, `Comercial`, `Ônibus`…) | todo |
 | `volume_total` | `volume_total` | texto | Total de veículos (volume de passagem) | veículos | todo |
+| `granularidade` | — | texto | Granularidade da linha, calculada pelo conversor a partir do formato da data (`data_da_passagem`); não existe na fonte | `dia` (`dd/mm/aaaa`), `mes` (`mm/aaaa`) ou nulo | todo |
 
 ## No lake
 
 - Dataset `antt/volume-radar`, particionado por `ano`, um Parquet por arquivo.
 - `ano` vem de `data_da_passagem` (`dd/mm/aaaa` ou `mm/aaaa`).
+- `granularidade` (`dia` ou `mes`) é calculada de cada linha pelo formato da data: o arquivo diário e o mensal consolidado do mesmo período caem na mesma partição `ano`, e a coluna os separa.
 - Arquivo sem cabeçalho: a primeira linha com 15 campos que não é o cabeçalho recebe os nomes do dicionário, na ordem. Se a ordem real das colunas diferisse, as colunas ficariam trocadas; nos 5 arquivos abertos a ordem coincide com a do dicionário.
 - Todas as colunas são texto.
-- Esquema de referência (`volume-radar.schema.json`): 15 colunas, gerado de 5 arquivos de amostra.
+- Esquema de referência (`volume-radar.schema.json`): 16 colunas, gerado de 6 arquivos de amostra (diários e mensais consolidados, com e sem cabeçalho).
 
 ## Cuidados de uso
 
-- **Dupla contagem entre arquivos diário e mensal.** O pacote traz, por concessionária, um arquivo diário (`volume-radar-<c>.csv`) e um mensal consolidado (`volume-radar-<c>_mensal_consolidado.csv`) para quase todas; os dois estão vigentes no bruto e caem na mesma partição `ano`. Para o `volume-sat` e o tráfego de praças a comparação numérica mostrou totais idênticos; aqui não foi feita, mas o padrão de nomes é o mesmo.
-- **Arquivos de meses ou anos diferentes colidem no nome e só o mais recente é convertido.** O bruto tem arquivos com nome nu (`volume-radar@AAAAMMDD.csv`), gravados por versões antigas do fetcher que davam o mesmo nome a recursos diferentes do pacote, ao lado dos arquivos com chave de recurso (`volume-radar_<recurso>-<id>@AAAAMMDD.csv`). `select_current` agrupa por nome sem a data e fica só com o mais novo de cada nome; os outros nomes nus ficam de fora do lake. Aqui, 5 dos 39 arquivos do bruto têm conteúdo (URL e hash) ausente do conjunto vigente (MS Via, Autopista Fluminense mensal, Ecoponte, Eco101 e outros).
+- **Dupla contagem entre arquivos diário e mensal.** O pacote traz, por concessionária, um arquivo diário (`volume-radar-<c>.csv`) e um mensal consolidado (`volume-radar-<c>_mensal_consolidado.csv`) para quase todas; os dois estão vigentes no bruto e caem na mesma partição `ano`. Conferido (2026-11-10) na CRT e na Via040: o total mensal de `volume_total` é idêntico nos dois arquivos (7.297.396 e 558.649 veículos). **Filtre `granularidade = "dia"` (ou `"mes"`) antes de somar**, senão o tráfego é contado duas vezes.
+- **Recursos de nome nu se somam aos demais.** O bruto tem arquivos de nome nu (`volume-radar@AAAAMMDD.csv`), gravados por versões antigas do fetcher que davam o mesmo nome a recursos diferentes do pacote (MS Via, Autopista Fluminense mensal, Ecoponte, Eco101 e outros). A versão vigente é escolhida por recurso (URL do manifesto ao lado), então todos entram, cada um no seu Parquet (`volume-radar_<id8>.parquet` para os de nome nu). Um arquivo de nome nu sem manifesto ao lado segue a regra do nome (só o mais recente de cada nome).
 - **Manifestos sem arquivo.** Oito manifestos do pacote não têm o CSV no bruto conferido.
-- **Velocidade é faixa e data pode ser só mês** (`mm/aaaa`).
+- **Velocidade é faixa e data pode ser só mês** (`mm/aaaa`); é isso que `granularidade` registra.
 - **Volume por linha é agregado** (até 892.624 veículos por linha nos mensais).
 
 ## Exemplos
 
-Volume mensal por concessionária em 2025, só nos arquivos mensais consolidados (`mm/aaaa`):
+Volume mensal por concessionária em 2025, só nos arquivos mensais consolidados (o diário repetiria o total):
 
 ```python
 import polars as pl
 
 r = pl.scan_parquet("lake/antt/volume-radar/ano=2025/*.parquet")
 mensal = (
-    r.filter(pl.col("data_da_passagem").str.len_chars() == 7)
+    r.filter(pl.col("granularidade") == "mes")
     .group_by("concessionaria", "data_da_passagem")
     .agg(pl.col("volume_total").cast(pl.Int64).sum().alias("veiculos"))
     .sort("concessionaria", "data_da_passagem")

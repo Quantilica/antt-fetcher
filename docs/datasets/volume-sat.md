@@ -12,7 +12,7 @@ dataset:
   unidade: "o volume de veículos de um tipo em uma faixa de velocidade, equipamento, sentido e faixa em um dia (arquivos diários e JSON) ou mês (mensais consolidados)"
   granularidade: {espacial: "equipamento (SAT), com rodovia, km e município", temporal: "dia ou mês"}
   formato_bruto: "CSV por concessionária (diário e mensal consolidado), separador ponto e vírgula, Windows-1252 ou UTF-8, mais um JSON ({\"volume_sat\":[...]}, um registro por linha, UTF-8)"
-  lake: {estado: convertido, particoes: ["ano"], chave: [], colunas: 15}
+  lake: {estado: convertido, particoes: ["ano"], chave: [], colunas: 16}
   unidades_de_medida: {volume_total: "veículos"}
   dados_pessoais: nenhum
   eras: []
@@ -44,7 +44,7 @@ Tráfego de veículos nos equipamentos de contagem veicular (SAT) das concession
 | Estado no lake | convertido |
 | Partições | `ano` |
 | Chave | — |
-| Colunas | 15 |
+| Colunas | 16 |
 | Unidades de medida | `volume_total`: veículos |
 | Dados pessoais | nenhum |
 | Eras | nenhuma |
@@ -54,15 +54,15 @@ Tráfego de veículos nos equipamentos de contagem veicular (SAT) das concession
 ## Origem e coleta
 
 - O fetcher baixa os CSV e o JSON do pacote `volume-sat` (`https://dados.antt.gov.br/dataset/volume-sat`): por concessionária, um CSV diário e um mensal consolidado (59 CSV e 47 JSON no catálogo).
-- No bruto: `volume-sat_<recurso>-<id>@AAAAMMDD.csv` e `volume-sat@AAAAMMDD.json` (275 MB, 719.856 registros diários de 4 concessionárias). Conferido em 2026-11-10 pela listagem do bruto: 46 arquivos de dados, 39 vigentes (1,7 GB); 9 manifestos sem arquivo no bruto conferido.
-- Quando o CSV tem um JSON do mesmo carimbo (`volume-sat@20261103.csv` e `.json`), o conversor lê o JSON e ignora o CSV.
+- No bruto: `volume-sat_<recurso>-<id>@AAAAMMDD.csv` e `volume-sat@AAAAMMDD.json` (275 MB, 719.856 registros diários de 4 concessionárias). Conferido em 2026-11-10 pela listagem do bruto: 46 arquivos de dados: 44 CSV de recursos distintos e vigentes (2,1 GB; um diário e um mensal consolidado por concessionária, mais os de nome nu), o JSON e um CSV de nome nu sem manifesto (`volume-sat@20261103.csv`) que tem o mesmo `sha256` do CSV da Via040 e por isso é tratado como cópia dele; 9 manifestos sem arquivo no bruto conferido.
+- O JSON repete concessionárias que têm CSV diário. O CSV manda: do JSON só entram as linhas de concessionárias sem CSV diário vigente (comparação pelo nome normalizado, lido do início de cada CSV), e um JSON inteiramente coberto não gera Parquet (`gemeo` no `inventory()`). No bruto conferido o JSON está inteiramente coberto, então o lake não carrega nada dele.
 
 ## Conteúdo
 
 - Unidade de análise: uma contagem por equipamento, período, sentido, faixa, faixa de velocidade e tipo de veículo.
 - Cobertura anunciada pela fonte: a partir de 2024, mensal. O que veio: 2024 a 2026 (amostra de 11 arquivos; o JSON vai de 2024-01-01 a 2026-10-27).
-- Layout: 15 colunas, as mesmas dos CSV e do JSON; difere do radar por `data_de_passagem` e `faixa_de_velocidade`.
-- Nulos (amostra de 12.554 linhas de 5 CSV): nenhum. O JSON tem 719.856 registros e o lake os mantém todos (719.856 linhas de arquivo, 719.856 registros).
+- Layout: 15 colunas na fonte, as mesmas dos CSV e do JSON, mais `granularidade` no lake; difere do radar por `data_de_passagem` e `faixa_de_velocidade`.
+- Nulos (amostra de 12.554 linhas de 5 CSV): nenhum. O JSON tem 719.856 registros de 4 concessionárias e todos já estão nos CSV diários, com a mesma contagem (Nova Rota do Oeste 568.467, Motiva Minas SP 61.373, EPR Via Mineira 51.387, Elovias 38.629; no CSV da Motiva Minas esses registros são os de 2024 em diante, de 113.595 desde 2022).
 
 ## Variáveis
 
@@ -85,33 +85,35 @@ Descrições do dicionário de dados da ANTT ("Dicionário de Dados - Tráfego d
 | `faixa_de_velocidade` | `faixa_de_velocidade` | texto | Faixa de velocidade do veículo, em km/h. O dicionário a chama `Velocidade` e dá o exemplo `80km/h`; os arquivos trazem faixas (`21 - 50 KM/h`, `> 160 KM/h`) | faixas em km/h | todo |
 | `tipo_de_veiculo` | `tipo_de_veiculo` | texto | Tipo de veículo | `Moto`, `Veículo leve`, `Veículo pesado`, `Não identificado` (varia entre arquivos: `Passeio`, `Comercial`, `Ônibus`…) | todo |
 | `volume_total` | `volume_total` | texto | Total de veículos (volume de passagem) | veículos | todo |
+| `granularidade` | — | texto | Granularidade da linha, calculada pelo conversor a partir do formato de `data_de_passagem`; não existe na fonte | `dia` (`dd/mm/aaaa` ou `aaaa-mm-dd`), `mes` (`mm/aaaa`) ou nulo | todo |
 
 ## No lake
 
 - Dataset `antt/volume-sat`, particionado por `ano`, um Parquet por arquivo e ano.
 - `ano` vem de `data_de_passagem` (`dd/mm/aaaa`, `mm/aaaa` ou `aaaa-mm-dd`).
-- O JSON é lido por streaming linha a linha e convertido para texto (`101.42`, `2`). Linha fora do formato de um registro por linha é erro.
-- Esquema de referência (`volume-sat.schema.json`): 15 colunas, gerado de 5 CSV de amostra; os 3.000 primeiros registros do JSON, convertidos à parte, têm as mesmas 15 colunas.
+- `granularidade` (`dia` ou `mes`) é calculada de cada linha pelo formato de `data_de_passagem`: o arquivo diário e o mensal consolidado do mesmo período caem na mesma partição `ano`, e a coluna os separa.
+- O JSON é lido por streaming linha a linha e convertido para texto (`101.42`, `2`), menos as concessionárias que já têm CSV diário. Linha fora do formato de um registro por linha é erro.
+- Esquema de referência (`volume-sat.schema.json`): 16 colunas, gerado da conversão de 5 CSV de amostra (diário e mensal consolidado) e dos primeiros 3 MB do JSON.
 
 ## Cuidados de uso
 
-- **Dupla contagem entre arquivos diário e mensal.** Para cada concessionária o pacote tem um arquivo diário e um mensal consolidado. Conferido (Autopista Fluminense, `...flum-53725139` diário, 58.553 linhas, e `...flum-2789ddd0` mensal, 2.862 linhas): os totais mensais de `volume_total` são idênticos nos dois. Os dois estão vigentes e caem na mesma partição `ano`.
-- **O JSON repete concessionárias que também têm CSV.** O JSON traz Nova Rota do Oeste, Motiva Minas SP, EPR Via Mineira e Elovias em registros diários, e as quatro também têm CSV diário e mensal vigentes (`..._df087189`, `..._e6bd3035`, `..._c70cb118`, `..._254b448e`, entre outros). A regra de "gêmeo" só ignora o CSV de mesmo nome e carimbo, então o resto é contado de novo.
-- **Arquivos de meses ou anos diferentes colidem no nome e só o mais recente é convertido.** O bruto tem arquivos com nome nu (`volume-sat@AAAAMMDD.csv`), gravados por versões antigas do fetcher que davam o mesmo nome a recursos diferentes do pacote, ao lado dos arquivos com chave de recurso (`volume-sat_<recurso>-<id>@AAAAMMDD.csv`). `select_current` agrupa por nome sem a data e fica só com o mais novo de cada nome; os outros nomes nus ficam de fora do lake. Aqui, 6 dos 53 arquivos do bruto têm conteúdo (URL e hash) ausente do conjunto vigente (por exemplo Ecovias Minas Goiás, MS Via, Via Bahia e Eco101).
+- **Dupla contagem entre arquivos diário e mensal.** Para cada concessionária o pacote tem um arquivo diário e um mensal consolidado. Conferido (Autopista Fluminense, `...flum-53725139` diário, 58.553 linhas, e `...flum-2789ddd0` mensal, 2.862 linhas): os totais mensais de `volume_total` são idênticos nos dois; o mesmo vale para Elovias, EPR Via Mineira e Nova Rota do Oeste (52.232.405, 80.409.293 e 323.911.139 veículos nos dois). Os dois caem na mesma partição `ano`: **filtre `granularidade = "dia"` (ou `"mes"`) antes de somar**, senão o tráfego é contado duas vezes.
+- **O JSON repete concessionárias que também têm CSV, e não entra.** O JSON traz Nova Rota do Oeste, Motiva Minas SP, EPR Via Mineira e Elovias em registros diários, e as quatro têm CSV diário vigente com as mesmas contagens de registros. O conversor não carrega as linhas do JSON dessas concessionárias; o que fica é o CSV. Uma concessionária que tenha só CSV mensal consolidado não cobre o JSON diário.
+- **Recursos de nome nu se somam aos demais.** O bruto tem arquivos de nome nu (`volume-sat@AAAAMMDD.csv`), gravados por versões antigas do fetcher que davam o mesmo nome a recursos diferentes do pacote (Ecovias Minas Goiás, MS Via, Via Bahia, Eco101, entre outros). A versão vigente é escolhida por recurso (URL do manifesto ao lado), então todos entram, cada um no seu Parquet (`volume-sat_<id8>.parquet` para os de nome nu). Um arquivo de nome nu sem manifesto ao lado segue a regra do nome (só o mais recente); no bruto conferido, `volume-sat@20260628.csv` está nesse caso.
 - **Manifestos sem arquivo.** Nove manifestos do pacote não têm o CSV no bruto conferido.
 - **Data mista.** `dd/mm/aaaa` (diário), `mm/aaaa` (mensal) e `aaaa-mm-dd` (JSON) na mesma coluna.
 - **`faixa_de_velocidade` é faixa** (`21 - 50 KM/h`), não velocidade medida.
 
 ## Exemplos
 
-Volume mensal de veículos por concessionária em 2025, só nos arquivos mensais consolidados (`mm/aaaa`):
+Volume mensal de veículos por concessionária em 2025, só nos arquivos mensais consolidados (o diário repetiria o total):
 
 ```python
 import polars as pl
 
 s = pl.scan_parquet("lake/antt/volume-sat/ano=2025/*.parquet")
 mensal = (
-    s.filter(pl.col("data_de_passagem").str.len_chars() == 7)
+    s.filter(pl.col("granularidade") == "mes")
     .group_by("concessionaria", "data_de_passagem")
     .agg(pl.col("volume_total").cast(pl.Int64).sum().alias("veiculos"))
     .sort("concessionaria", "data_de_passagem")

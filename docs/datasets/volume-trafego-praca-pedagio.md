@@ -12,7 +12,7 @@ dataset:
   unidade: "o volume de veículos de uma praça, sentido, tipo de cobrança e categoria em um mês (arquivos mensais) ou em um dia (arquivos diários)"
   granularidade: {espacial: "praça de pedágio, com concessionária e sentido", temporal: "mês, ou dia nos arquivos diários de 2024 em diante"}
   formato_bruto: "CSV (cada recurso do pacote é um arquivo), Windows-1252 na maior parte (alguns UTF-8), separador ponto e vírgula, texto entre aspas só em parte dos arquivos"
-  lake: {estado: convertido, particoes: ["ano"], chave: [], colunas: 9}
+  lake: {estado: convertido, particoes: ["ano"], chave: [], colunas: 10}
   unidades_de_medida: {volume_total: "veículos"}
   dados_pessoais: nenhum
   eras:
@@ -45,7 +45,7 @@ Volume de tráfego por praça de pedágio informado pelas concessionárias de ro
 | Estado no lake | convertido |
 | Partições | `ano` |
 | Chave | — |
-| Colunas | 9 |
+| Colunas | 10 |
 | Unidades de medida | `volume_total`: veículos |
 | Dados pessoais | nenhum |
 | Eras | 2024: `categoria` dá lugar a `categoria_eixo`; passam a existir, além dos arquivos mensais consolidados, arquivos diários por concessionária com 3,3 milhões de linhas por ano |
@@ -56,14 +56,14 @@ Volume de tráfego por praça de pedágio informado pelas concessionárias de ro
 
 - O fetcher baixa os recursos CSV do pacote `volume-trafego-praca-pedagio` do portal de dados abertos da ANTT (`https://dados.antt.gov.br/dataset/volume-trafego-praca-pedagio`), que tem um CSV (e um JSON gêmeo) por ano de 2010 em diante e, desde 2024, versões diárias e mensais consolidadas.
 - No bruto, os arquivos novos se chamam `volume-trafego-praca-pedagio_<recurso>-<id>@AAAAMMDD.csv`, em que o sufixo é a data da última modificação na fonte; os mais antigos têm o nome nu `volume-trafego-praca-pedagio@AAAAMMDD.csv`. O fetcher descarta documentação (PDF) e o painel; os JSON do pacote não são convertidos.
-- Conferido em 2026-11-10 pela listagem do bruto: 23 arquivos de dados, 19 pela regra do arquivo mais recente. Anos 2010 a 2022 (um arquivo por ano), 2024 e 2025 em versão mensal consolidada e em versão diária, 2026 em versão diária e um arquivo de nome nu (mensal). **O ano de 2023 não está entre os arquivos vigentes** (veja os cuidados de uso).
+- Conferido em 2026-11-10 pela listagem do bruto: 23 arquivos de dados (1,3 GB), 22 vigentes e um por recurso: anos 2010 a 2022 (um arquivo por ano), 2023 (`volume-trafego-praca-pedagio@20241203.csv`, nome nu), dois arquivos diários de 2024, o mensal consolidado de 2024, 2025 em versão mensal consolidada e em versão diária, 2026 em versão diária e um arquivo de nome nu (mensal), mais o JSON de 2013 (nome nu; os JSON não são convertidos). O que fica de fora é um arquivo de nome nu sem manifesto (`@20260519`) que repete o mensal consolidado de 2024.
 
 ## Conteúdo
 
 - Unidade de análise: o volume de uma combinação concessionária, praça, sentido, tipo de cobrança, categoria e tipo de veículo em um mês (ou dia). Chave não verificada.
-- Cobertura anunciada pela fonte: 2010 em diante, cobertura temporal "Anual" e atualização "Mensal". O que veio: 2010 a 2022, 2024, 2025 e 2026 (até o mês do arquivo `@20260930`).
+- Cobertura anunciada pela fonte: 2010 em diante, cobertura temporal "Anual" e atualização "Mensal". O que veio: 2010 a 2026 (até o mês do arquivo `@20260930`), com 2023 inclusive.
 - Eras: de 2010 a 2022 a categoria vem em `categoria`; de 2024 em diante em `categoria_eixo` (código numérico). O dicionário anterior a 2023 usa `categoria`; o de 2023 usa `categoria_eixo` e `Tipo de Cobrança`. A `mes_ano` varia de formato conforme o arquivo (dia ou mês).
-- Nulos (amostra de 5 arquivos, 429.634 linhas: 2010, 2020, 2021, 2024 mensal e o arquivo de nome nu de 2026): `categoria` é nula em 60,2% (as linhas dos arquivos de 2024 e 2026) e `categoria_eixo` em 39,8% (as dos arquivos até 2021), porque cada era usa uma das duas colunas. Os demais campos não têm nulo na amostra.
+- Nulos (amostra de 5 arquivos, 429.634 linhas: 2010, 2020, 2021, 2024 mensal e o arquivo de nome nu de 2026, medida antes da coluna `granularidade`): `categoria` é nula em 60,2% (as linhas dos arquivos de 2024 e 2026) e `categoria_eixo` em 39,8% (as dos arquivos até 2021), porque cada era usa uma das duas colunas. Os demais campos não têm nulo na amostra.
 
 ## Variáveis
 
@@ -79,19 +79,22 @@ Descrições do dicionário de dados da ANTT (dois PDFs, o de 2010 a 2022 e o de
 | `categoria` | `categoria` | texto | Representação veicular na tabela de tarifas (dicionário anterior a 2023). Valores livres, como `Categoria 6` ou `Veículo Comercial 3 eixos` | — | 2010 a 2022 |
 | `tipo_de_veiculo` | `tipo_de_veiculo` | texto | Classificação veicular | `Comercial`, `Passeio`, `Moto`, `Veículo Pequeno` (conferido) | todo |
 | `volume_total` | `volume_total` | texto | Volume total de veículos que passaram na praça. Texto com vírgula decimal e `,00` (por exemplo `13,00`) | veículos | todo |
+| `granularidade` | — | texto | Granularidade da linha, calculada pelo conversor a partir do formato de `mes_ano`; não existe na fonte | `dia` (`dd/mm/aaaa`), `mes` (`mm/aaaa`) ou nulo | todo |
 | `categoria_eixo` | `categoria_eixo` | texto | Categoria por número de eixos ou da tabela de tarifas (dicionário de 2023, `categoria_eixo`); nos arquivos conferidos é um código numérico de 1 a 20 como texto | 1 a 20, como texto (conferido) | 2024 em diante |
 
 ## No lake
 
 - Dataset `antt/volume-trafego-praca-pedagio`, particionado por `ano`, um Parquet por arquivo de origem.
 - `ano` vem da coluna `mes_ano` (qualquer grupo de 4 dígitos na linha, entre 1900 e 2100); linha sem ano válido iria para a partição `ano=__HIVE_DEFAULT_PARTITION__` (não houve na amostra).
+- `granularidade` (`dia` ou `mes`) é calculada de cada linha pelo formato de `mes_ano`: o arquivo diário e o mensal consolidado do mesmo período caem na mesma partição `ano`, e a coluna os separa.
 - Todas as colunas são texto, com nomes normalizados (minúsculas, sem acento). Arquivos UTF-8 e Windows-1252 são lidos com decodificação própria; aspas internas soltas são reparadas.
-- Esquema de referência (`volume-trafego-praca-pedagio.schema.json`): 9 colunas, gerado de uma conversão de 5 arquivos de amostra (2010, 2020, 2021, 2024 e o arquivo de nome nu de 2026).
+- Esquema de referência (`volume-trafego-praca-pedagio.schema.json`): 10 colunas, gerado de uma conversão de 6 arquivos de amostra (2010, 2020, 2021, 2024 mensal, o arquivo de nome nu de 2026 e o início do diário de 2026).
 
 ## Cuidados de uso
 
-- **Dupla contagem entre arquivos diário e mensal.** Em 2024, o arquivo mensal consolidado e o arquivo diário somam o mesmo total: 834.732.408 veículos nos dois (143.377 linhas no mensal, 3.312.763 no diário; conferido em 2026-11-10). Os dois caem em `ano=2024`, então somar a partição conta o tráfego duas vezes. Use só um dos dois por concessionária e ano. O mesmo padrão (diário e `_mensal_consolidado`) vale para 2025 e 2026 pelos nomes de recurso; não foi comparado numericamente.
-- **Arquivos de meses ou anos diferentes colidem no nome e só o mais recente é convertido.** O bruto tem arquivos com nome nu (`volume-trafego-praca-pedagio@AAAAMMDD.csv`), gravados por versões antigas do fetcher que davam o mesmo nome a recursos diferentes do pacote, ao lado dos arquivos com chave de recurso (`volume-trafego-praca-pedagio_<recurso>-<id>@AAAAMMDD.csv`). `select_current` agrupa por nome sem a data e fica só com o mais novo de cada nome; os outros nomes nus ficam de fora do lake. Aqui, `volume-trafego-praca-pedagio@20241203.csv` (recurso `volume-trafego-praca-pedagio-2023.csv`, 15,3 MB) perde para o nome nu mais novo `@20260930`; por isso 2023 não está no lake. Conferido: 2 dos 23 arquivos de dados do bruto têm conteúdo (URL e hash) ausente do conjunto vigente (2023 e o JSON de 2013).
+- **Dupla contagem entre arquivos diário e mensal.** Em 2024, o arquivo mensal consolidado e o arquivo diário (`2024 Diário`) somam o mesmo total: 834.732.408 veículos nos dois (143.377 linhas no mensal, 3.312.763 no diário; conferido em 2026-11-10). Os dois caem em `ano=2024`, então somar a partição conta o tráfego duas vezes. **Filtre `granularidade = "mes"` (ou `"dia"`) antes de somar.** O mesmo padrão (diário e `_mensal_consolidado`) vale para 2025 e 2026 pelos nomes de recurso; não foi comparado numericamente.
+- **Dois arquivos diários de 2024.** O portal lista, além do `2024 Diário` (maio de 2026), o recurso `2024` de maio de 2025 (`volume-trafego-praca-pedagio-2024.csv`, nome nu no bruto): 3.358.858 linhas e 848.941.037 veículos, contra 3.312.763 e 834.732.408 do diário novo. São revisões do mesmo período, os dois são vigentes no lake (cada um no seu Parquet) e somar `granularidade = "dia"` de 2024 conta o ano duas vezes: use um só deles (o `2024 Diário` é o mais recente).
+- **Recursos de nome nu se somam aos demais.** O bruto tem arquivos de nome nu (`volume-trafego-praca-pedagio@AAAAMMDD.csv`), gravados por versões antigas do fetcher que davam o mesmo nome a recursos diferentes do pacote (2023, 2024 e o mensal de 2026, entre outros). A versão vigente é escolhida por recurso (URL do manifesto ao lado), então todos entram, cada um no seu Parquet (`volume-trafego-praca-pedagio_<id8>.parquet` para os de nome nu); o ano de 2023 passa a existir no lake. Um arquivo de nome nu sem manifesto ao lado segue a regra do nome (só o mais recente de cada nome).
 - **Manifesto sem arquivo.** Um manifesto de 2026 (`...concession-b475d3ac@20260930`) não tem o CSV correspondente no bruto conferido.
 - **Volume é texto com vírgula decimal** (`13,00`); troque a vírgula por ponto antes de somar.
 - **`mes_ano` muda de formato** entre arquivos diários (`dd/mm/aaaa`) e mensais (`mm/aaaa`); extraia o mês com cuidado.
@@ -106,7 +109,7 @@ import polars as pl
 
 vol = pl.scan_parquet("lake/antt/volume-trafego-praca-pedagio/ano=2024/*.parquet")
 mensal = (
-    vol.filter(pl.col("mes_ano").str.len_chars() == 7)  # mm/aaaa: arquivo mensal
+    vol.filter(pl.col("granularidade") == "mes")  # só o arquivo mensal consolidado
     .with_columns(v=pl.col("volume_total").str.replace(",", ".").cast(pl.Float64))
     .group_by("concessionaria", "mes_ano")
     .agg(pl.col("v").sum().alias("veiculos"))

@@ -12,7 +12,7 @@ import re
 import tempfile
 import unicodedata
 import zipfile
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -501,7 +501,7 @@ def _json_concessionaires(json_file: Path) -> frozenset[str]:
     return frozenset(found)
 
 
-def _covered_by_csv(selected: Sequence[Path], ds_id: str) -> frozenset[str]:
+def _covered_by_csv(selected: Iterable[Path], ds_id: str) -> frozenset[str]:
     """Concessionarias que ja entram pelos CSV diarios vigentes de ``ds_id``."""
     csv_files = [
         f for f in selected if f.suffix.lower() == ".csv" and _slug_of(f.name) == ds_id
