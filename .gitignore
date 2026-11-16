@@ -43,4 +43,7 @@ htmlcov/
 uv.lock
 .backfill/
 data/
+lake/
+
+# Específico do repo
 /lake/

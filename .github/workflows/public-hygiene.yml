@@ -84,8 +84,11 @@ jobs:
 
       - name: Mensagens de commit do PR
         if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          range="${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}"
+          range="${BASE_SHA}..${HEAD_SHA}"
           msgs=$(git log --format='%h %s%n%b' "$range")
           hits=$(printf '%s\n' "$msgs" \
             | grep -iE -f "$RUNNER_TEMP/termos-comuns.txt" \
@@ -96,4 +99,3 @@ jobs:
             exit 1
           fi
           echo "Limpo."
-
