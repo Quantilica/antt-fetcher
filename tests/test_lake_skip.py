@@ -50,6 +50,14 @@ def _bruto(tmp_path: Path) -> Path:
     return raw.parent
 
 
+@pytest.fixture(autouse=True)
+def _cache_fora_do_lake(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    """Cache de cobertura num diretorio de teste (nunca o ``~/.cache`` real)."""
+    cache = tmp_path / "cache"
+    monkeypatch.setenv("QUANTILICA_LAKE_CACHE_DIR", str(cache))
+    return cache
+
+
 @pytest.fixture
 def leituras(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> list[str]:
     """Registra toda abertura/leitura do bruto: ZIP, open, transcodificação, scan.
@@ -431,7 +439,7 @@ def test_json_do_sat_nao_le_csv_diario_nem_json_sem_mudanca(
     r1 = converter.convert(raw, lake, datasets=ds)
     assert not r1.errors
     assert (r1.converted, r1.skipped) == (2, 0)
-    cache = lake / "antt" / "volume-sat" / ".cobertura-pares.json"
+    cache = tmp_path / "cache" / "antt" / "volume-sat" / "cobertura-pares.json"
     assert cache.is_file()
 
     leituras.clear()
@@ -446,7 +454,7 @@ def test_json_do_sat_sem_cache_relê_uma_vez_e_refaz_o_cache(
     raw, lake = _bruto_sat(tmp_path), tmp_path / "lake"
     ds = ["volume-sat"]
     converter.convert(raw, lake, datasets=ds)
-    cache = lake / "antt" / "volume-sat" / ".cobertura-pares.json"
+    cache = tmp_path / "cache" / "antt" / "volume-sat" / "cobertura-pares.json"
     cache.write_text("{ nao e json", encoding="utf-8")
 
     leituras.clear()
@@ -509,3 +517,59 @@ def test_espiao_do_hash_pega_a_leitura_quando_nao_ha_sidecar(
     r = converter.convert(raw, lake, datasets=ds)
     assert (r.converted, r.skipped, r.errors) == (0, 1, [])
     assert "hash" in leituras
+
+
+def test_cache_de_cobertura_fica_fora_do_lake(tmp_path: Path) -> None:
+    raw, lake = _bruto_sat(tmp_path), tmp_path / "lake"
+    converter.convert(raw, lake, datasets=["volume-sat"])
+    assert (
+        tmp_path / "cache" / "antt" / "volume-sat" / "cobertura-pares.json"
+    ).is_file()
+    assert not list(lake.rglob("*cobertura-pares*"))
+
+
+def test_cache_apagado_entre_builds_so_perde_a_economia(
+    tmp_path: Path, leituras: list[str]
+) -> None:
+    """Lake descartavel + cache ausente: o build relê os pares e dá o mesmo
+    resultado; o cache volta a existir."""
+    import shutil
+
+    raw, lake = _bruto_sat(tmp_path), tmp_path / "lake"
+    ds = ["volume-sat"]
+    r1 = converter.convert(raw, lake, datasets=ds)
+    shutil.rmtree(tmp_path / "cache")
+    leituras.clear()
+    r2 = converter.convert(raw, lake, datasets=ds)
+    assert (r1.converted, r1.skipped) == (2, 0)
+    assert (r2.converted, r2.skipped, r2.errors) == (0, 2, [])
+    assert "_csv_pairs_cached" in leituras and "_json_pairs" in leituras
+    assert (
+        tmp_path / "cache" / "antt" / "volume-sat" / "cobertura-pares.json"
+    ).is_file()
+
+
+def test_cache_antigo_dentro_do_dataset_e_removido(tmp_path: Path) -> None:
+    raw, lake = _bruto_sat(tmp_path), tmp_path / "lake"
+    ds = ["volume-sat"]
+    converter.convert(raw, lake, datasets=ds)
+    antigo = lake / "antt" / "volume-sat" / ".cobertura-pares.json"
+    antigo.write_text("{}", encoding="utf-8")
+    converter.convert(raw, lake, datasets=ds)
+    assert not antigo.exists()
+
+
+def test_diretorio_de_cache_padrao_segue_o_xdg(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("QUANTILICA_LAKE_CACHE_DIR")
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "xdg"))
+    assert lake_mod.lake_cache_dir() == tmp_path / "xdg" / "quantilica" / "lake"
+    monkeypatch.delenv("XDG_CACHE_HOME")
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    assert (
+        lake_mod.lake_cache_dir()
+        == tmp_path / "home" / ".cache" / "quantilica" / "lake"
+    )
+    monkeypatch.setenv("QUANTILICA_LAKE_CACHE_DIR", str(tmp_path / "c"))
+    assert lake_mod.lake_cache_dir() == tmp_path / "c"

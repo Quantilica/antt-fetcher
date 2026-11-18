@@ -556,29 +556,56 @@ def _csv_pairs_cached(
     )
 
 
+CACHE_DIR_ENV = "QUANTILICA_LAKE_CACHE_DIR"
+_LEGACY_CACHE_NAME = ".cobertura-pares.json"
+
+
+def lake_cache_dir() -> Path:
+    """Diretorio de cache do build, FORA do lake.
+
+    ``QUANTILICA_LAKE_CACHE_DIR`` quando definida; senao
+    ``$XDG_CACHE_HOME/quantilica/lake`` (se absoluto) ou ``~/.cache/quantilica/lake``.
+    """
+    explicit = os.environ.get(CACHE_DIR_ENV, "").strip()
+    if explicit:
+        return Path(explicit).expanduser()
+    xdg = os.environ.get("XDG_CACHE_HOME", "").strip()
+    if xdg and Path(xdg).is_absolute():
+        return Path(xdg) / "quantilica" / "lake"
+    return Path.home() / ".cache" / "quantilica" / "lake"
+
+
 class _PairsCache:
     """Cache persistente dos pares (concessionaria, mes) por arquivo bruto.
 
     A cobertura do JSON pelos CSV diarios (``_json_coverage``) pede os pares de
     TODOS os CSV diarios vigentes e os do proprio JSON, lidos do arquivo inteiro:
     sem cache, todo build os leria de novo mesmo sem nada ter mudado. O cache mora
-    no dataset (``<dataset>/.cobertura-pares.json``, arquivo oculto que o lake
-    ignora) e vale por ``(nome, sha256 do arquivo, nome na URL de origem)``: o
-    sha256 vem do sidecar quando confiavel (nao le o arquivo), e muda se o
-    conteudo mudar; o nome e a URL entram porque a granularidade depende deles.
-    Sem sidecar o sha256 sai da leitura do arquivo (so perde a economia). Cache
-    ilegivel, de outra versao ou com entrada estranha e ignorado e refeito.
+    FORA do lake (``<cache>/antt/<conjunto>/cobertura-pares.json``, ver
+    :func:`lake_cache_dir`): o lake pode ser uma camada temporaria descartada
+    depois da publicacao, e um cache dentro dele sumiria a cada build. Vale por
+    ``(nome, sha256 do arquivo, nome na URL de origem)``: o sha256 vem do sidecar
+    quando confiavel (nao le o arquivo), e muda se o conteudo mudar; o nome e a
+    URL entram porque a granularidade depende deles. Sem sidecar o sha256 sai da
+    leitura do arquivo (so perde a economia). Cache ausente, ilegivel, de outra
+    versao ou com entrada estranha e ignorado e refeito.
     """
 
-    FILENAME = ".cobertura-pares.json"
+    FILENAME = "cobertura-pares.json"
     # Mudou ``_csv_pairs``/``_json_pairs`` (o que entra nos pares)? Incremente.
     VERSION = 1
 
-    def __init__(self, dataset_dir: Path) -> None:
-        self.path = dataset_dir / self.FILENAME
+    def __init__(self, ds_id: str, legacy_dataset_dir: Path | None = None) -> None:
+        self.path = lake_cache_dir() / "antt" / ds_id / self.FILENAME
         self._data: dict[str, dict[str, list[list[str]]]] = {"csv": {}, "json": {}}
         self._used: dict[str, set[str]] = {"csv": set(), "json": set()}
         self._dirty = False
+        if legacy_dataset_dir is not None:
+            # Versoes anteriores gravavam o cache dentro do dataset do lake.
+            try:
+                (legacy_dataset_dir / _LEGACY_CACHE_NAME).unlink(missing_ok=True)
+            except OSError as exc:
+                logger.warning("ANTT: cache antigo nao removido (%s)", exc)
         try:
             raw = json.loads(self.path.read_text(encoding="utf-8"))
             if raw.get("version") == self.VERSION:
@@ -1245,7 +1272,9 @@ class AnttLakeConverter:
                 for ds, w in candidatos.items():
                     cache = None
                     if ds in JSON_DATASETS:
-                        cache = caches.setdefault(ds, _PairsCache(w.dataset_dir))
+                        if ds not in caches:
+                            caches[ds] = _PairsCache(ds, w.dataset_dir)
+                        cache = caches[ds]
                     self._converter_json(
                         w, ds, raw_file, base, current, cache, res, force=force
                     )
