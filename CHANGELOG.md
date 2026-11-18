@@ -14,6 +14,7 @@ e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR
 - CI e infraestrutura alinhados ao template (fetcher-template v0.2.1).
 
 ### Corrigido
+- `lake`: o build sem mudança não lê mais o bruto. Antes de abrir o ZIP ou transcodificar o CSV, confere pelos rodapés do lake (`LakeWriter.origin_recorded`, que usa o sha256 do sidecar) se o bruto já está em dia no conjunto e, estando, só conta `skipped`. O arquivo de outro conjunto (pelo nome) deixa de ser aberto, e o hash de desempate de nomes gêmeos usa o sidecar quando confiável. O JSON do SAT segue o caminho completo, porque depende da cobertura pelos CSV diários. Mesma contagem de `converted`/`skipped`/`errors`; `force` e bruto novo seguem convertendo. Exige `quantilica-analytics>=0.15.0`.
 - CI: o pyproject declara o PyPI antes do índice Quantilica (`[[tool.uv.index]]`), e o workflow perde `--index` e `--index-strategy`. Com a estratégia padrão `first-index`, o `uv sync` só consulta o índice para o que não está no PyPI (`quantilica-analytics`) e deixa de receber o 503 intermitente que o GitHub Pages devolve a caminhos inexistentes.
 
 ## [0.4.0] - 2026-11-10

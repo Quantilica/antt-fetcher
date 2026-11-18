@@ -21,9 +21,13 @@ from urllib.parse import urlsplit
 
 try:
     import polars as pl
-    from quantilica.analytics.lake import ConvertResult, LakeWriter
+    from quantilica.analytics.lake import (
+        META_FILE_KEY,
+        ConvertResult,
+        LakeWriter,
+        sha256_file,
+    )
     from quantilica.core.exceptions import StorageError
-    from quantilica.core.files import sha256_file
     from quantilica.core.lake import (
         DatasetDescriptor,
         Planned,
@@ -966,6 +970,42 @@ def _without_pairs(
     )
 
 
+_TMP_DIRNAME = ".tmp"
+_ORIGIN_FILE = "quantilica.origin_file"
+_HIVE_ANO = "ano="
+
+
+def _indexar_origens(dataset_dir: Path) -> dict[str, list[str | None]]:
+    """``{bruto: [chave de arquivo de cada Parquet que o cita]}``, so dos rodapes.
+
+    Uma listagem de diretorios e a leitura dos rodapes dos Parquets do dataset,
+    nunca do bruto. Cada Parquet e uma escrita (membro e ano) que o build sem
+    mudanca conta como ``skipped``.
+    """
+    indice: dict[str, list[str | None]] = {}
+    if not dataset_dir.is_dir():
+        return indice
+    for parquet in sorted(dataset_dir.rglob("*.parquet")):
+        if _TMP_DIRNAME in parquet.relative_to(dataset_dir).parts:
+            continue
+        try:
+            meta = pl.read_parquet_metadata(parquet)
+        except (OSError, pl.exceptions.PolarsError):
+            continue
+        if nome := meta.get(_ORIGIN_FILE):
+            indice.setdefault(nome, []).append(meta.get(META_FILE_KEY))
+    return indice
+
+
+def _chaves_do_bruto(registros: Iterable[str | None], base: str) -> bool:
+    """Todas as chaves registradas sao as que o conversor daria hoje a este bruto
+    (``base`` ou ``base__<membro>``). Chave diferente (a regra de chaves mudou,
+    ou o rodape nao a traz) pede a conversao, como antes."""
+    return all(
+        k is not None and (k == base or k.startswith(f"{base}__")) for k in registros
+    )
+
+
 class AnttLakeConverter:
     """Universal Hive Parquet Lake converter for ANTT datasets."""
 
@@ -1095,7 +1135,49 @@ class AnttLakeConverter:
                     f"ANTT {colliding.name}: {reason}; arquivo nao convertido"
                 )
 
+        # Rodapes do lake por bruto de origem, por dataset (lidos sob demanda).
+        origens: dict[str, dict[str, list[str | None]]] = {}
+
         for raw_file in sorted(current.selected):
+            candidatos = writers
+            # O conjunto sai do nome (``_dataset_of``), sem abrir: arquivo de outro
+            # conjunto nao e desta tarefa e nao e aberto (nem um ZIP antigo nomeado
+            # para outro conjunto). Nome do catalogo ou arquivo solto (que e o
+            # proprio membro) sem conjunto nao tem o que converter; ZIP antigo sem
+            # conjunto no nome so se resolve abrindo.
+            alvo = _dataset_of(raw_file.name, raw_file.name)
+            if alvo and alvo not in writers:
+                continue
+            if _slug_of(raw_file.name) in CATALOG or raw_file.suffix.lower() in (
+                ".csv",
+                ".json",
+            ):
+                if not alvo:
+                    continue
+                candidatos = {alvo: writers[alvo]}
+            # Em dia no lake: o bruto igual ao registrado nos rodapes e pulado antes
+            # de abrir o ZIP ou transcodificar o CSV (o bruto pode estar numa
+            # montagem lenta). ``skipped`` e o numero de Parquets gravados a partir
+            # dele, o mesmo que o laco abaixo contaria. O JSON depende dos CSV
+            # diarios (cobertura) e segue o caminho completo.
+            pendentes: dict[str, LakeWriter] = {}
+            base = composite_file_key(f"{current.selected[raw_file]}.csv").lower()
+            for ds, w in candidatos.items():
+                if not force and raw_file.suffix.lower() != ".json":
+                    if ds not in origens:
+                        origens[ds] = _indexar_origens(w.dataset_dir)
+                    registros = origens[ds].get(raw_file.name)
+                    if (
+                        registros
+                        and _chaves_do_bruto(registros, base)
+                        and w.origin_recorded(raw_file)
+                    ):
+                        res.skipped += len(registros)
+                        continue
+                pendentes[ds] = w
+            if not pendentes:
+                continue
+
             try:
                 names = _csv_member_names(raw_file)
             except (OSError, zipfile.BadZipFile) as exc:
@@ -1111,7 +1193,7 @@ class AnttLakeConverter:
             for name in members:
                 label = name or raw_file.name
                 ds_id = _dataset_of(raw_file.name, label)
-                if not ds_id or ds_id not in writers:
+                if not ds_id or ds_id not in pendentes:
                     continue
                 # Cada membro e uma origem propria no lake (chave composta
                 # zip+membro): o sha256 do ZIP e o mesmo para todos os membros.
@@ -1157,7 +1239,7 @@ class AnttLakeConverter:
                 try:
                     with _member_as_text(raw_file, name) as csv_path:
                         self._convert_member(
-                            writers[ds_id],
+                            pendentes[ds_id],
                             ds_id,
                             raw_file,
                             key,
