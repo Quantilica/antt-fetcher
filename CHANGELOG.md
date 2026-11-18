@@ -12,6 +12,7 @@ e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR
 
 ### Alterado
 - `lake`: o cache dos pares de cobertura do `volume-sat` sai de dentro do lake. Antes ficava em `<conjunto>/.cobertura-pares.json`, e num lake que é descartado depois da publicação (que só envia os Parquets) ele sumia a cada build e todos os CSV diários eram relidos. Agora fica em `<cache>/antt/volume-sat/cobertura-pares.json`, com `<cache>` = `$QUANTILICA_LAKE_CACHE_DIR`, ou `$XDG_CACHE_HOME/quantilica/lake`, ou `~/.cache/quantilica/lake`. Cache ausente continua funcionando (os pares são relidos e o cache refeito). O arquivo antigo dentro do conjunto é removido na primeira conversão e nada mais é gravado ali.
+- Testes: o isolamento de `QUANTILICA_LAKE_CACHE_DIR` passa para o `tests/conftest.py` (fixture automática), e nenhuma suíte grava mais no `~/.cache` real.
 - CI e infraestrutura alinhados ao template (fetcher-template v0.2.1).
 
 ### Corrigido

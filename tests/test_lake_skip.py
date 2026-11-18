@@ -50,14 +50,6 @@ def _bruto(tmp_path: Path) -> Path:
     return raw.parent
 
 
-@pytest.fixture(autouse=True)
-def _cache_fora_do_lake(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
-    """Cache de cobertura num diretorio de teste (nunca o ``~/.cache`` real)."""
-    cache = tmp_path / "cache"
-    monkeypatch.setenv("QUANTILICA_LAKE_CACHE_DIR", str(cache))
-    return cache
-
-
 @pytest.fixture
 def leituras(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> list[str]:
     """Registra toda abertura/leitura do bruto: ZIP, open, transcodificação, scan.
