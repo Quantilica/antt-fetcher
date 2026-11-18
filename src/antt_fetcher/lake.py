@@ -22,9 +22,9 @@ from urllib.parse import urlsplit
 try:
     import polars as pl
     from quantilica.analytics.lake import (
-        META_FILE_KEY,
         ConvertResult,
         LakeWriter,
+        output_id,
         sha256_file,
     )
     from quantilica.core.exceptions import StorageError
@@ -556,23 +556,121 @@ def _csv_pairs_cached(
     )
 
 
-def _csv_pairs(raw_csv: Path, ds_id: str) -> frozenset[Pair]:
+class _PairsCache:
+    """Cache persistente dos pares (concessionaria, mes) por arquivo bruto.
+
+    A cobertura do JSON pelos CSV diarios (``_json_coverage``) pede os pares de
+    TODOS os CSV diarios vigentes e os do proprio JSON, lidos do arquivo inteiro:
+    sem cache, todo build os leria de novo mesmo sem nada ter mudado. O cache mora
+    no dataset (``<dataset>/.cobertura-pares.json``, arquivo oculto que o lake
+    ignora) e vale por ``(nome, sha256 do arquivo, nome na URL de origem)``: o
+    sha256 vem do sidecar quando confiavel (nao le o arquivo), e muda se o
+    conteudo mudar; o nome e a URL entram porque a granularidade depende deles.
+    Sem sidecar o sha256 sai da leitura do arquivo (so perde a economia). Cache
+    ilegivel, de outra versao ou com entrada estranha e ignorado e refeito.
+    """
+
+    FILENAME = ".cobertura-pares.json"
+    # Mudou ``_csv_pairs``/``_json_pairs`` (o que entra nos pares)? Incremente.
+    VERSION = 1
+
+    def __init__(self, dataset_dir: Path) -> None:
+        self.path = dataset_dir / self.FILENAME
+        self._data: dict[str, dict[str, list[list[str]]]] = {"csv": {}, "json": {}}
+        self._used: dict[str, set[str]] = {"csv": set(), "json": set()}
+        self._dirty = False
+        try:
+            raw = json.loads(self.path.read_text(encoding="utf-8"))
+            if raw.get("version") == self.VERSION:
+                for kind in ("csv", "json"):
+                    entries = raw.get(kind) or {}
+                    if isinstance(entries, dict):
+                        self._data[kind] = {
+                            k: v for k, v in entries.items() if isinstance(v, list)
+                        }
+        except (OSError, ValueError, AttributeError):
+            pass
+
+    @staticmethod
+    def key(raw_file: Path) -> str:
+        return f"{raw_file.name}|{sha256_file(raw_file)}|{_source_url_name(raw_file)}"
+
+    def get(self, kind: str, raw_file: Path) -> frozenset[Pair] | None:
+        key = self.key(raw_file)
+        self._used[kind].add(key)
+        pairs = self._data[kind].get(key)
+        if pairs is None:
+            return None
+        try:
+            return frozenset((str(c), str(m)) for c, m in pairs)
+        except (TypeError, ValueError):
+            return None
+
+    def put(self, kind: str, raw_file: Path, pairs: frozenset[Pair]) -> None:
+        key = self.key(raw_file)
+        self._used[kind].add(key)
+        self._data[kind][key] = [[c, m] for c, m in sorted(pairs)]
+        self._dirty = True
+
+    def save(self, *, prune_csv: bool = False) -> None:
+        """Grava (tmp + rename) o que mudou. ``prune_csv`` tira as entradas de CSV
+        que a consulta nao usou (arquivo que saiu do bruto vigente)."""
+        if prune_csv:
+            stale = set(self._data["csv"]) - self._used["csv"]
+            for key in stale:
+                del self._data["csv"][key]
+            self._dirty = self._dirty or bool(stale)
+        if not self._dirty:
+            return
+        payload = {"version": self.VERSION, **self._data}
+        tmp = self.path.with_name(f"{self.path.name}.{os.getpid()}.tmp")
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            tmp.write_text(json.dumps(payload, separators=(",", ":")), encoding="utf-8")
+            os.replace(tmp, self.path)
+            self._dirty = False
+        except OSError as exc:  # cache e so economia: nunca derruba o build
+            logger.warning("ANTT: cache de cobertura nao gravado (%s)", exc)
+            tmp.unlink(missing_ok=True)
+
+
+def _csv_pairs(
+    raw_csv: Path, ds_id: str, cache: _PairsCache | None = None
+) -> frozenset[Pair]:
     """Pares (concessionaria, mes) que um CSV DIARIO traz, lidos do arquivo inteiro
-    (so as duas colunas, em streaming); vazio para o mensal consolidado."""
+    (so as duas colunas, em streaming); vazio para o mensal consolidado. Com
+    ``cache``, o arquivo so e lido quando o sha256 dele nao esta no cache."""
+    if cache is not None:
+        hit = cache.get("csv", raw_csv)
+        if hit is not None:
+            return hit
     st = raw_csv.stat()
-    return _csv_pairs_cached(str(raw_csv), st.st_size, st.st_mtime_ns, ds_id)
+    pairs = _csv_pairs_cached(str(raw_csv), st.st_size, st.st_mtime_ns, ds_id)
+    if cache is not None:
+        cache.put("csv", raw_csv, pairs)
+    return pairs
 
 
 def _json_coverage(
-    json_file: Path, ds_id: str, selected: Iterable[Path]
+    json_file: Path,
+    ds_id: str,
+    selected: Iterable[Path],
+    cache: _PairsCache | None = None,
 ) -> tuple[frozenset[Pair], bool]:
     """Pares do JSON que ja entram pelos CSV diarios vigentes, e se o JSON ficou
-    todo coberto (nada dele precisa ser escrito)."""
+    todo coberto (nada dele precisa ser escrito). Com ``cache``, nenhum bruto e
+    lido quando todos ja estao nele (por sha256)."""
     covered: set[Pair] = set()
     for f in selected:
         if f.suffix.lower() == ".csv" and _slug_of(f.name) == ds_id:
-            covered |= _csv_pairs(f, ds_id)
-    pairs = _json_pairs(json_file, ds_id)
+            covered |= _csv_pairs(f, ds_id, cache)
+    pairs = cache.get("json", json_file) if cache is not None else None
+    if pairs is None:
+        pairs = _json_pairs(json_file, ds_id)
+        if cache is not None:
+            cache.put("json", json_file, pairs)
+    if cache is not None:
+        cache.save(prune_csv=True)
     return frozenset(pairs & covered), bool(pairs) and pairs <= covered
 
 
@@ -970,40 +1068,26 @@ def _without_pairs(
     )
 
 
-_TMP_DIRNAME = ".tmp"
-_ORIGIN_FILE = "quantilica.origin_file"
-_HIVE_ANO = "ano="
+def _chaves_das_saidas(saidas: Iterable[str]) -> set[str]:
+    """Chaves de arquivo das saidas declaradas (``ano=AAAA/<chave>``)."""
+    return {saida.partition("/")[2] for saida in saidas}
 
 
-def _indexar_origens(dataset_dir: Path) -> dict[str, list[str | None]]:
-    """``{bruto: [chave de arquivo de cada Parquet que o cita]}``, so dos rodapes.
-
-    Uma listagem de diretorios e a leitura dos rodapes dos Parquets do dataset,
-    nunca do bruto. Cada Parquet e uma escrita (membro e ano) que o build sem
-    mudanca conta como ``skipped``.
-    """
-    indice: dict[str, list[str | None]] = {}
-    if not dataset_dir.is_dir():
-        return indice
-    for parquet in sorted(dataset_dir.rglob("*.parquet")):
-        if _TMP_DIRNAME in parquet.relative_to(dataset_dir).parts:
-            continue
-        try:
-            meta = pl.read_parquet_metadata(parquet)
-        except (OSError, pl.exceptions.PolarsError):
-            continue
-        if nome := meta.get(_ORIGIN_FILE):
-            indice.setdefault(nome, []).append(meta.get(META_FILE_KEY))
-    return indice
-
-
-def _chaves_do_bruto(registros: Iterable[str | None], base: str) -> bool:
+def _chaves_do_bruto(chaves: Iterable[str | None], base: str) -> bool:
     """Todas as chaves registradas sao as que o conversor daria hoje a este bruto
     (``base`` ou ``base__<membro>``). Chave diferente (a regra de chaves mudou,
     ou o rodape nao a traz) pede a conversao, como antes."""
     return all(
-        k is not None and (k == base or k.startswith(f"{base}__")) for k in registros
+        k is not None and (k == base or k.startswith(f"{base}__")) for k in chaves
     )
+
+
+def _saidas_em_dia(writer: LakeWriter, raw_file: Path) -> list[str] | None:
+    """Saidas declaradas do bruto quando ele esta COMPLETO no lake (todas as saidas
+    que declarou existem, mesmo sha256), senao ``None``. So rodapes e sidecar."""
+    if not writer.origin_complete(raw_file):
+        return None
+    return writer.origin_outputs(raw_file) or None
 
 
 class AnttLakeConverter:
@@ -1135,44 +1219,49 @@ class AnttLakeConverter:
                     f"ANTT {colliding.name}: {reason}; arquivo nao convertido"
                 )
 
-        # Rodapes do lake por bruto de origem, por dataset (lidos sob demanda).
-        origens: dict[str, dict[str, list[str | None]]] = {}
+        # Cache dos pares da cobertura do JSON (so o volume-sat tem JSON).
+        caches: dict[str, _PairsCache] = {}
 
         for raw_file in sorted(current.selected):
+            suffix = raw_file.suffix.lower()
             candidatos = writers
-            # O conjunto sai do nome (``_dataset_of``), sem abrir: arquivo de outro
-            # conjunto nao e desta tarefa e nao e aberto (nem um ZIP antigo nomeado
-            # para outro conjunto). Nome do catalogo ou arquivo solto (que e o
-            # proprio membro) sem conjunto nao tem o que converter; ZIP antigo sem
-            # conjunto no nome so se resolve abrindo.
-            alvo = _dataset_of(raw_file.name, raw_file.name)
-            if alvo and alvo not in writers:
-                continue
-            if _slug_of(raw_file.name) in CATALOG or raw_file.suffix.lower() in (
-                ".csv",
-                ".json",
-            ):
-                if not alvo:
+            # CSV/JSON solto e arquivo com nome do catalogo: o conjunto sai do nome
+            # (``_dataset_of``), sem abrir, e arquivo de outro conjunto nao e desta
+            # tarefa. O ZIP de nome antigo (fora do catalogo) NAO se filtra pelo
+            # nome: o rotulo do membro manda e o nome so desempata (``_dataset_of``),
+            # e isso so se sabe listando o diretorio do ZIP.
+            if _slug_of(raw_file.name) in CATALOG or suffix in (".csv", ".json"):
+                alvo = _dataset_of(raw_file.name, raw_file.name)
+                if not alvo or alvo not in writers:
                     continue
                 candidatos = {alvo: writers[alvo]}
-            # Em dia no lake: o bruto igual ao registrado nos rodapes e pulado antes
-            # de abrir o ZIP ou transcodificar o CSV (o bruto pode estar numa
-            # montagem lenta). ``skipped`` e o numero de Parquets gravados a partir
-            # dele, o mesmo que o laco abaixo contaria. O JSON depende dos CSV
-            # diarios (cobertura) e segue o caminho completo.
-            pendentes: dict[str, LakeWriter] = {}
+
             base = composite_file_key(f"{current.selected[raw_file]}.csv").lower()
+            if suffix == ".json":
+                # Solto e so de um conjunto (``candidatos``); a decisao de pular
+                # depende da cobertura pelos CSV diarios (``_converter_json``).
+                if not _is_readable(raw_file):
+                    continue
+                for ds, w in candidatos.items():
+                    cache = None
+                    if ds in JSON_DATASETS:
+                        cache = caches.setdefault(ds, _PairsCache(w.dataset_dir))
+                    self._converter_json(
+                        w, ds, raw_file, base, current, cache, res, force=force
+                    )
+                continue
+
+            # Completo no lake: o bruto igual ao registrado nos rodapes, com TODAS
+            # as saidas que declarou (um Parquet por membro e ano), e pulado antes
+            # de abrir o ZIP ou transcodificar o CSV (o bruto pode estar numa
+            # montagem lenta). ``skipped`` e o numero de saidas declaradas, o mesmo
+            # que o laco abaixo contaria. Um build interrompido deixa saidas
+            # faltando e o bruto e reaberto.
+            pendentes: dict[str, LakeWriter] = {}
             for ds, w in candidatos.items():
-                if not force and raw_file.suffix.lower() != ".json":
-                    if ds not in origens:
-                        origens[ds] = _indexar_origens(w.dataset_dir)
-                    registros = origens[ds].get(raw_file.name)
-                    if (
-                        registros
-                        and _chaves_do_bruto(registros, base)
-                        and w.origin_recorded(raw_file)
-                    ):
-                        res.skipped += len(registros)
+                if not force and (saidas := _saidas_em_dia(w, raw_file)):
+                    if _chaves_do_bruto(_chaves_das_saidas(saidas), base):
+                        res.skipped += len(saidas)
                         continue
                 pendentes[ds] = w
             if not pendentes:
@@ -1190,95 +1279,171 @@ class AnttLakeConverter:
             else:
                 members = list(names)
 
+            # Membros por conjunto, na ordem do ZIP.
+            por_dataset: dict[str, list[str | None]] = {}
             for name in members:
-                label = name or raw_file.name
-                ds_id = _dataset_of(raw_file.name, label)
-                if not ds_id or ds_id not in pendentes:
-                    continue
-                # Cada membro e uma origem propria no lake (chave composta
-                # zip+membro): o sha256 do ZIP e o mesmo para todos os membros.
-                key = composite_file_key(
-                    f"{current.selected[raw_file]}.csv", name
-                ).lower()
-                skip: frozenset[Pair] = frozenset()
-                after_write: Callable[[], object] | None = None
-                if name is None and raw_file.suffix.lower() == ".json":
-                    dataset_dir = lake_path / self.source_id / ds_id
-                    others = {
-                        k
-                        for f, k in current.selected.items()
-                        if f != raw_file and _dataset_of(f.name, f.name) == ds_id
-                    }
-                    try:
-                        skip, fully_covered = _json_coverage(
-                            raw_file, ds_id, current.selected
-                        )
-                        base = key
-                        key = _json_key(base, skip)
-                        if fully_covered:
-                            # Nada a gravar: os Parquets antigos do JSON saem ja.
-                            _purge_json_parquets(dataset_dir, base, None, others)
-                            continue
-                    except Exception as exc:
-                        res.errors.append(f"Erro ao ler {raw_file.name}: {exc}")
-                        continue
+                ds_id = _dataset_of(raw_file.name, name or raw_file.name)
+                if ds_id and ds_id in pendentes:
+                    por_dataset.setdefault(ds_id, []).append(name)
 
-                    # O JSON depende dos CSV: a identidade da escrita inclui o que
-                    # sai dele. As outras identidades do JSON so saem, de todas as
-                    # particoes (o LakeWriter so mexe nas que reescreve), DEPOIS
-                    # de a nova ser gravada sem erro: se a escrita falha, as linhas
-                    # antigas continuam no lake.
-                    def after_write(
-                        dataset_dir: Path = dataset_dir,
-                        base: str = base,
-                        key: str = key,
-                        others: set[str] = others,
-                    ) -> object:
-                        return _purge_json_parquets(dataset_dir, base, key, others)
-
-                try:
-                    with _member_as_text(raw_file, name) as csv_path:
-                        self._convert_member(
-                            pendentes[ds_id],
-                            ds_id,
-                            raw_file,
-                            key,
-                            csv_path,
-                            label,
-                            res,
-                            skip_pairs=skip,
-                        )
-                    if after_write is not None:
-                        after_write()
-                except Exception as exc:
-                    res.errors.append(
-                        f"Erro ao converter {label} em {raw_file.name}: {exc}"
-                    )
+            for ds_id, membros in por_dataset.items():
+                self._convert_dataset(
+                    pendentes[ds_id],
+                    ds_id,
+                    raw_file,
+                    membros,
+                    lambda name, raw=raw_file: composite_file_key(
+                        f"{current.selected[raw]}.csv", name
+                    ).lower(),
+                    res,
+                )
 
         return res
 
-    def _convert_member(
+    def _converter_json(
         self,
         writer: LakeWriter,
         ds_id: str,
         raw_file: Path,
-        key: str,
-        csv_path: Path,
-        label: str,
+        base: str,
+        current: _Current,
+        cache: _PairsCache | None,
+        res: ConvertResult,
+        *,
+        force: bool,
+    ) -> None:
+        """JSON solto: so entra o que os CSV diarios vigentes nao cobrem.
+
+        A identidade da escrita inclui a cobertura (``_json_key``). A cobertura sai
+        do cache de pares (nenhum CSV nem o JSON e lido num build sem mudanca) e,
+        com a mesma chave e as saidas todas no lake, o JSON e pulado.
+        """
+        dataset_dir = writer.dataset_dir
+        others = {
+            k
+            for f, k in current.selected.items()
+            if f != raw_file and _dataset_of(f.name, f.name) == ds_id
+        }
+        try:
+            skip, fully_covered = _json_coverage(
+                raw_file, ds_id, current.selected, cache
+            )
+            key = _json_key(base, skip)
+            if fully_covered:
+                # Nada a gravar: os Parquets antigos do JSON saem ja.
+                _purge_json_parquets(dataset_dir, base, None, others)
+                return
+        except Exception as exc:
+            res.errors.append(f"Erro ao ler {raw_file.name}: {exc}")
+            return
+        if not force and (saidas := _saidas_em_dia(writer, raw_file)):
+            if _chaves_das_saidas(saidas) == {key}:
+                res.skipped += len(saidas)
+                return
+
+        # O JSON depende dos CSV: a identidade da escrita inclui o que sai dele. As
+        # outras identidades do JSON so saem, de todas as particoes (o LakeWriter so
+        # mexe nas que reescreve), DEPOIS de a nova ser gravada sem erro: se a
+        # escrita falha, as linhas antigas continuam no lake.
+        def after_write() -> object:
+            return _purge_json_parquets(dataset_dir, base, key, others)
+
+        self._convert_dataset(
+            writer,
+            ds_id,
+            raw_file,
+            [None],
+            lambda _name: key,
+            res,
+            skip_pairs=skip,
+            after_write=after_write,
+        )
+
+    def _convert_dataset(
+        self,
+        writer: LakeWriter,
+        ds_id: str,
+        raw_file: Path,
+        membros: list[str | None],
+        key_of: Callable[[str | None], str],
         res: ConvertResult,
         *,
         skip_pairs: frozenset[Pair] = frozenset(),
+        after_write: Callable[[], object] | None = None,
     ) -> None:
-        """Escreve um membro, uma particao ``ano`` por vez (lazy, streaming).
+        """Converte os membros de um bruto que caem num conjunto.
 
-        ``skip_pairs`` sao os pares (concessionaria, mes) que o JSON repete e que
-        ja entram pelo CSV diario: as linhas deles ficam de fora.
+        Cada Parquet declara TODAS as saidas do bruto no conjunto (a uniao dos anos
+        de todos os membros), para o proximo build so pular o bruto quando nenhuma
+        faltar. Com mais de um membro as saidas so se conhecem planejando todos
+        antes da primeira escrita (uma passada a mais); com um so, a mesma passada
+        planeja e grava. Membro que da erro deixa o bruto sem declaracao: segue
+        sendo reaberto e o erro aparece a cada build, como sempre.
         """
+        saidas: list[str] | None = None
+        escrever = membros
+        if len(membros) > 1:
+            uniao: set[str] = set()
+            escrever = []
+            limpo = True
+            for name in membros:
+                label = name or raw_file.name
+                try:
+                    with _member_as_text(raw_file, name) as csv_path:
+                        plano = self._planejar(
+                            csv_path, ds_id, raw_file, label, skip_pairs
+                        )
+                except Exception as exc:
+                    limpo = False
+                    res.errors.append(
+                        f"Erro ao converter {label} em {raw_file.name}: {exc}"
+                    )
+                    continue
+                escrever.append(name)
+                if plano is not None:
+                    uniao.update(output_id({"ano": y}, key_of(name)) for y in plano[1])
+            saidas = sorted(uniao) if limpo and uniao else None
+
+        for name in escrever:
+            label = name or raw_file.name
+            # Cada membro e uma origem propria no lake (chave composta
+            # zip+membro): o sha256 do ZIP e o mesmo para todos os membros.
+            key = key_of(name)
+            try:
+                with _member_as_text(raw_file, name) as csv_path:
+                    plano = self._planejar(csv_path, ds_id, raw_file, label, skip_pairs)
+                    if plano is not None:
+                        lf, anos = plano
+                        declaradas = saidas
+                        if len(membros) == 1:
+                            declaradas = [output_id({"ano": y}, key) for y in anos]
+                        self._escrever_anos(
+                            writer, raw_file, key, lf, anos, label, declaradas, res
+                        )
+                if after_write is not None:
+                    after_write()
+            except Exception as exc:
+                res.errors.append(
+                    f"Erro ao converter {label} em {raw_file.name}: {exc}"
+                )
+
+    @staticmethod
+    def _planejar(
+        csv_path: Path,
+        ds_id: str,
+        raw_file: Path,
+        label: str,
+        skip_pairs: frozenset[Pair],
+    ) -> tuple[pl.LazyFrame, list[int | None]] | None:
+        """Quadro lazy do membro com a coluna ``ano`` e os anos que ele grava;
+        ``None`` se nao ha linhas. ``skip_pairs`` sao os pares (concessionaria,
+        mes) que o JSON repete e que ja entram pelo CSV diario: as linhas deles
+        ficam de fora."""
         lf, names = _scan_text(csv_path, ds_id, label)
         if skip_pairs:
             lf = _without_pairs(lf, names, ds_id, skip_pairs)
         if lf.head(1).collect().height == 0:
-            return
+            return None
 
         snapshot = ds_id in SNAPSHOT_DATASETS
         wanted = () if snapshot else YEAR_COLUMNS.get(ds_id, _GENERIC_YEAR_COLUMNS)
@@ -1329,7 +1494,21 @@ class AnttLakeConverter:
             )
 
         anos = lf.select("ano").unique().collect()["ano"].to_list()
-        for year in sorted(anos, key=lambda y: (y is None, y)):
+        return lf, sorted(anos, key=lambda y: (y is None, y))
+
+    @staticmethod
+    def _escrever_anos(
+        writer: LakeWriter,
+        raw_file: Path,
+        key: str,
+        lf: pl.LazyFrame,
+        anos: list[int | None],
+        label: str,
+        declaradas: list[str] | None,
+        res: ConvertResult,
+    ) -> None:
+        """Escreve um membro, uma particao ``ano`` por vez (lazy, streaming)."""
+        for year in anos:
             part = lf.filter(
                 pl.col("ano").is_null() if year is None else pl.col("ano") == year
             )
@@ -1346,6 +1525,7 @@ class AnttLakeConverter:
                 src=raw_file,
                 partitions={"ano": year},
                 file_key_name=key,
+                origin_outputs=declaradas,
             )
             if written.status == "skipped":
                 res.skipped += 1
