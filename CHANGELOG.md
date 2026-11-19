@@ -5,17 +5,20 @@ Todas as alterações notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/),
 e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 
-## [Não lançado]
+## [0.4.1] - 2026-11-19
 
 ### Adicionado
+
 - Testes: identidade do registro conferida.
 
 ### Alterado
+
 - `lake`: o cache dos pares de cobertura do `volume-sat` sai de dentro do lake. Antes ficava em `<conjunto>/.cobertura-pares.json`, e num lake que é descartado depois da publicação (que só envia os Parquets) ele sumia a cada build e todos os CSV diários eram relidos. Agora fica em `<cache>/antt/volume-sat/cobertura-pares.json`, com `<cache>` = `$QUANTILICA_LAKE_CACHE_DIR`, ou `$XDG_CACHE_HOME/quantilica/lake`, ou `~/.cache/quantilica/lake`. Cache ausente continua funcionando (os pares são relidos e o cache refeito). O arquivo antigo dentro do conjunto é removido na primeira conversão e nada mais é gravado ali.
 - Testes: o isolamento de `QUANTILICA_LAKE_CACHE_DIR` passa para o `tests/conftest.py` (fixture automática), e nenhuma suíte grava mais no `~/.cache` real.
 - CI e infraestrutura alinhados ao template (fetcher-template v0.2.1).
 
 ### Corrigido
+
 - `lake`: o build sem mudança não lê mais o bruto. Antes de abrir o ZIP ou transcodificar o CSV, confere pelos rodapés do lake (`LakeWriter.origin_complete`, que usa o sha256 do sidecar) se o bruto já está em dia no conjunto e com todas as saídas e, estando, só conta `skipped` pelas saídas declaradas (`origin_outputs`). Cada Parquet declara as saídas do bruto no conjunto (a união dos anos de todos os membros): conversão interrompida deixa de virar pulo permanente, e lake gravado antes da declaração reconverte uma vez. Membro com erro continua sendo reportado a cada build. O filtro pelo nome vale só para CSV/JSON solto e nome do catálogo; o ZIP de nome antigo é roteado pelo rótulo do membro (só o diretório central é listado). O JSON do `volume-sat` depende da cobertura pelos CSV diários: os pares (concessionária, mês) de cada CSV e do JSON ficam num cache em arquivo (`cobertura-pares.json`, por nome, sha256 do sidecar e nome na URL de origem; ver a entrada sobre o cache em Alterado), então um build sem mudança não lê nenhum CSV diário nem o JSON; cache ausente, ilegível ou desatualizado é refeito. Mesma contagem de `converted`/`skipped`/`errors`; `force` e bruto novo seguem convertendo. Exige `quantilica-analytics>=0.15.0`.
 - CI: o pyproject declara o PyPI antes do índice Quantilica (`[[tool.uv.index]]`), e o workflow perde `--index` e `--index-strategy`. Com a estratégia padrão `first-index`, o `uv sync` só consulta o índice para o que não está no PyPI (`quantilica-analytics`) e deixa de receber o 503 intermitente que o GitHub Pages devolve a caminhos inexistentes.
 
