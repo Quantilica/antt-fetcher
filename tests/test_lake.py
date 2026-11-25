@@ -29,6 +29,14 @@ def test_converter_metadata() -> None:
     assert "rntrc" in datasets
 
 
+def test_converter_declara_selecao_propria_de_versao() -> None:
+    """O conversor escolhe a vigente pelo manifesto: quem chama não monta visão."""
+    from antt_fetcher import plugin
+
+    assert converter.selects_versions is True
+    assert plugin.convert.selects_versions is True  # type: ignore[attr-defined]
+
+
 def test_converter_empty_dir(tmp_path: Path) -> None:
     """Test convert with empty input directory."""
     raw_dir = tmp_path / "raw"

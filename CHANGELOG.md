@@ -5,6 +5,12 @@ Todas as alterações notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/),
 e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 
+## [Não lançado]
+
+### Adicionado
+
+- O conversor declara `selects_versions = True` (em `AnttLakeConverter` e na função `convert` do plugin). `<fetcher> convert`, `<fetcher> pipeline` e `sql lake convert` passam a ler a declaração e entregam a pasta do bruto como está, em vez de uma visão só com a versão vigente de cada nome: aqui a versão vigente vem do recurso do manifesto (o mesmo nome local já serviu a recursos diferentes, um por ano), e a visão por nome descartaria recursos vigentes.
+
 ## [0.4.1] - 2026-11-19
 
 ### Adicionado

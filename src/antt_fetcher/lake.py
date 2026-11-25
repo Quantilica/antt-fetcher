@@ -1120,6 +1120,12 @@ def _saidas_em_dia(writer: LakeWriter, raw_file: Path) -> list[str] | None:
 class AnttLakeConverter:
     """Universal Hive Parquet Lake converter for ANTT datasets."""
 
+    #: Quem chama (``<fetcher> convert``, ``sql lake convert``) entrega a pasta do
+    #: bruto como está, sem montar uma visão só com a versão vigente de cada nome:
+    #: este conversor escolhe a vigente pelo recurso do manifesto
+    #: (``_current_versions``), e o mesmo nome local serviu a recursos diferentes.
+    selects_versions = True
+
     def __init__(self, source_id: str = SOURCE_ID) -> None:
         self.source_id = source_id
 

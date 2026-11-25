@@ -161,6 +161,11 @@ def convert(
     return lake.converter.convert(input_dir, lake_dir, datasets=dataset, force=force)
 
 
+# O conversor escolhe a versão vigente pelo recurso do manifesto, não pelo nome:
+# o quantilica-cli deve entregar a pasta do bruto, sem montar a visão por nome.
+convert.selects_versions = True  # type: ignore[attr-defined]
+
+
 def catalogo(
     grupo: str | None = typer.Argument(None, help="Grupo, alias ou macro-alias"),
     tier: str | None = typer.Option(None, help="r1 (baixa hoje) ou listed"),
