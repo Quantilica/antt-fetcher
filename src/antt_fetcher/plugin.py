@@ -304,7 +304,7 @@ def _tolerar_falha_de_descoberta(callback: Any) -> Any:
 
     O ``check`` é a primeira etapa da coleta em modo de plano: se um pacote que
     responde 404 para sempre derrubasse o ``check``, não haveria plano e a coleta
-    cairia no ``sync`` completo (milhares de requisições ao portal, todo dia). Com a
+    cairia no ``sync`` completo (milhares de requisições à fonte, todo dia). Com a
     tolerância, a falha vira um item ``skip-unavailable``/``listing-error`` e uma
     linha ERROR no log; o plano dos demais pacotes é gravado e o
     ``sync --from-plan`` conta a falha nos erros (saída 3 ou 1).
