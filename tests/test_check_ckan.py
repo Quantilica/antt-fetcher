@@ -75,7 +75,7 @@ def test_manifesto_de_outra_url_no_mesmo_caminho_nao_vale(
     assert item.reason == "ckan-not-present"
     assert item.local_path == str(tmp_path / "rodovias" / "volume-radar@20260628.csv")
     assert item.remote_size == 100
-    assert item.remote_last_modified == "2026-06-28T16:01:55+00:00"
+    assert item.remote_last_modified is None
 
 
 def test_tamanho_diferente_baixa(tmp_path: Path, no_head: list[str]) -> None:
@@ -229,16 +229,100 @@ def test_tamanho_diferente_continua_sendo_ckan_changed(
     assert fetcher.check_entry(_entry(), tmp_path).reason == "ckan-changed"
 
 
-def test_item_do_plano_traz_o_momento_do_ckan_em_utc(
+def test_momento_do_ckan_so_vai_ao_plano_quando_modificado_depois_do_download(
     tmp_path: Path, no_head: list[str]
 ) -> None:
     """O reclassificador compara ``remote_last_modified`` com o da versão guardada."""
-    novo = fetcher.check_entry(
-        _entry(remote_modified="2026-06-28T16:01:55.5"), tmp_path / "a"
-    )
-    assert novo.action == "download"
-    assert novo.remote_last_modified == "2026-06-28T16:01:55.500000+00:00"
+    novo = fetcher.check_entry(_entry(), tmp_path / "a")
+    assert (novo.reason, novo.remote_last_modified) == ("ckan-not-present", None)
+
     _sidecar(tmp_path / "b", "volume-radar@20260628.csv", URL_A, 100)
     fresco = fetcher.check_entry(_entry(), tmp_path / "b")
-    assert fresco.action == "skip-up-to-date"
-    assert fresco.remote_last_modified == "2026-06-28T16:01:55+00:00"
+    assert (fresco.reason, fresco.remote_last_modified) == ("ckan-fresh", None)
+
+    _sidecar(tmp_path / "c", "volume-radar@20260101.csv", URL_A, 90)
+    mudou = fetcher.check_entry(_entry(), tmp_path / "c")
+    assert (mudou.reason, mudou.remote_last_modified) == ("ckan-changed", None)
+
+    _sidecar_com_data(
+        tmp_path / "d",
+        "volume-radar@20260601.csv",
+        URL_A,
+        100,
+        "2026-06-01T03:00:00+00:00",
+    )
+    depois = fetcher.check_entry(
+        _entry(remote_modified="2026-06-28T16:01:55.5"), tmp_path / "d"
+    )
+    assert depois.reason == "ckan-modified-after-download"
+    assert depois.remote_last_modified == "2026-06-28T16:01:55.500000+00:00"
+
+
+def _reclassificar(item: Any, tmp_path: Path, versao_lm: str, size: int = 100) -> dict:
+    """``reclassify_plan`` real do ingest, com uma versão guardada (sessão simulada)."""
+    import datetime as dt
+    from types import SimpleNamespace
+
+    plan_mod = pytest.importorskip("workers.ingest.plan")
+    original = Path(item.local_path).relative_to(tmp_path).as_posix()
+    linha = SimpleNamespace(
+        original_path=original,
+        etag=None,
+        last_modified=dt.datetime.fromisoformat(versao_lm).replace(tzinfo=dt.UTC),
+        size_bytes=size,
+        created_at=dt.datetime(2026, 6, 29, tzinfo=dt.UTC),
+        sha256="x",
+        last_seen_at=dt.datetime(2026, 6, 29, tzinfo=dt.UTC),
+    )
+
+    class Sessao:
+        def execute(self, stmt: Any) -> list[Any]:
+            return [linha]
+
+    plano = {
+        "items": [
+            {
+                "dataset": item.dataset,
+                "id": item.id,
+                "url": item.url,
+                "local_path": item.local_path,
+                "remote_etag": item.remote_etag,
+                "remote_last_modified": item.remote_last_modified,
+                "remote_size": item.remote_size,
+                "action": item.action,
+                "reason": item.reason,
+            }
+        ]
+    }
+    plan_mod.reclassify_plan(plano, Sessao(), tmp_path)
+    return plano["items"][0]
+
+
+def test_reclassificador_nao_rebaixa_recurso_inalterado_com_data_do_ckan_decimos_depois(
+    tmp_path: Path, no_head: list[str]
+) -> None:
+    """HTTP guardado em 12:24:28; CKAN 0,4 s depois, mesmo tamanho: segue em dia."""
+    _sidecar(tmp_path, "volume-radar@20260628.csv", URL_A, 100)
+    item = fetcher.check_entry(
+        _entry(remote_modified="2026-06-28T12:24:28.4"), tmp_path
+    )
+    assert item.reason == "ckan-fresh"
+    assert item.remote_last_modified is None
+    final = _reclassificar(item, tmp_path, "2026-06-28T12:24:28")
+    assert (final["action"], final["reason"]) == ("skip-up-to-date", "pg-size")
+
+
+def test_reclassificador_rebaixa_reenvio_de_mesmo_tamanho_posterior_ao_download(
+    tmp_path: Path, no_head: list[str]
+) -> None:
+    """Com ``ckan-modified-after-download`` o momento segue e a versão antiga perde."""
+    _sidecar_com_data(
+        tmp_path, "volume-radar@20260601.csv", URL_A, 100, "2026-06-01T03:00:00+00:00"
+    )
+    item = fetcher.check_entry(_entry(), tmp_path)
+    assert item.reason == "ckan-modified-after-download"
+    antigo = _reclassificar(item, tmp_path, "2026-06-01T02:00:00")
+    assert (antigo["action"], antigo["reason"]) == ("download", "pg-changed")
+    # versão guardada já tão nova quanto o CKAN: nada a refazer
+    novo = _reclassificar(item, tmp_path, "2026-06-28T16:01:55")
+    assert (novo["action"], novo["reason"]) == ("skip-up-to-date", "pg-size")

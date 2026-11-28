@@ -283,11 +283,16 @@ def _antt_check_entry(entry: dict[str, Any], output_dir: Path) -> CheckPlanItem:
         partition=None,
         local_path=str(local),
         remote_etag=None,
-        # Momento do CKAN em UTC: a regra do reclassificador que compara o tamanho
-        # com o da versão guardada só dá "em dia" se o ``last_modified`` da versão
-        # não for anterior a ele; sem isto, um reenvio de mesmo tamanho no mesmo
-        # dia era desfeito pelo reclassificador.
-        remote_last_modified=moment.isoformat(),
+        # Só quando este ``check`` concluiu ``ckan-modified-after-download``: aí o
+        # momento do CKAN (UTC) segue no plano para a regra do reclassificador que
+        # compara o tamanho com o da versão guardada não desfazer um reenvio de mesmo
+        # tamanho. Nos demais casos fica ``None``: o ``Last-Modified`` HTTP guardado
+        # tem precisão de segundos e a data do CKAN, de microssegundos, e uns décimos
+        # de diferença (ou uma edição de metadados no CKAN depois do envio) fariam um
+        # recurso inalterado ser rebaixado todo dia.
+        remote_last_modified=(
+            moment.isoformat() if reason == "ckan-modified-after-download" else None
+        ),
         remote_size=size,
         local_exists=exists,
         action=action,
