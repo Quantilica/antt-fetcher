@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+import json
+from pathlib import Path
+from unittest.mock import patch
 
+import httpx2
 import pytest
-from quantilica.core.manifests import DownloadManifest
+from quantilica.core.exceptions import CorruptPayloadError
+from quantilica.core.http import HttpClient
 
 from antt_fetcher.client import AnttClient
 
@@ -45,34 +49,60 @@ def test_pick_package_resources() -> None:
     assert picked[0]["format"] == "CSV"
 
 
-def test_download_resource_success(tmp_path) -> None:
-    client = AnttClient()
+def _client_with(handler) -> AnttClient:
+    http = HttpClient(
+        attempts=1, retry_base_delay=0.0, transport=httpx2.MockTransport(handler)
+    )
+    return AnttClient(client=http)
+
+
+def test_download_resource_real_sem_mock_do_core(tmp_path: Path) -> None:
+    """A assinatura chama o ``download_with_manifest`` de verdade (sem mock)."""
+    body = b"col1;col2\n1;2\n"
+    client = _client_with(
+        lambda request: httpx2.Response(
+            200,
+            content=body,
+            headers={"Last-Modified": "Wed, 01 Jan 2025 00:00:00 GMT"},
+        )
+    )
     target = tmp_path / "dados_2024.csv"
-    target.write_bytes(b"col1;col2\n1;2\n")
-    mock_manifest = MagicMock(spec=DownloadManifest)
-    with patch.object(
-        client.client, "download_with_manifest", return_value=mock_manifest
-    ):
-        res = client.download_resource("https://example.com/test.csv", target)
-        assert res == mock_manifest
+    path = client.download_resource(
+        "https://dados.antt.test/dados_2024.csv", target, dataset_id="radar"
+    )
+    assert path == target
+    assert target.read_bytes() == body
+    manifest = json.loads((tmp_path / "dados_2024.csv.manifest.json").read_text())
+    assert manifest["source_id"] == "antt"
+    assert manifest["dataset_id"] == "radar"
+    assert manifest["producer"] == "antt-fetcher"
+    assert manifest["url"] == "https://dados.antt.test/dados_2024.csv"
 
 
-def test_download_resource_waf_rejection(tmp_path) -> None:
-    client = AnttClient()
+def test_download_resource_rejeita_pagina_do_waf(tmp_path: Path) -> None:
+    """HTML de bloqueio com HTTP 200 não vira arquivo nem manifesto."""
+    html = b"<html><head><title>Request Rejected</title></head></html>"
+    client = _client_with(
+        lambda request: httpx2.Response(
+            200, content=html, headers={"Content-Type": "text/html"}
+        )
+    )
     target = tmp_path / "dados_rejeitados.csv"
-    target.write_bytes(b"<html><head><title>Request Rejected</title></head></html>")
-    manifest_path = tmp_path / "dados_rejeitados.csv.manifest.json"
-    manifest_path.write_text("{}", encoding="utf-8")
-    mock_manifest = MagicMock(spec=DownloadManifest)
-    with patch.object(
-        client.client, "download_with_manifest", return_value=mock_manifest
-    ):
-        with pytest.raises(ValueError, match="rejeitado pelo WAF"):
-            client.download_resource(
-                "https://example.com/test.csv", target, manifest_path=manifest_path
-            )
+    with pytest.raises(CorruptPayloadError):
+        client.download_resource(
+            "https://dados.antt.test/test.csv", target, dataset_id="radar"
+        )
     assert not target.exists()
-    assert not manifest_path.exists()
+    assert not (tmp_path / "dados_rejeitados.csv.manifest.json").exists()
+
+
+def test_cliente_padrao_respeita_ambiente(monkeypatch: pytest.MonkeyPatch) -> None:
+    """O cliente de catálogo vem do cliente padrão do host (``QUANTILICA_HTTP_*``)."""
+    monkeypatch.setenv("QUANTILICA_HTTP_TIMEOUT", "12")
+    monkeypatch.setenv("QUANTILICA_HTTP_ATTEMPTS", "2")
+    client = AnttClient()
+    assert client.client.timeout == 12.0
+    assert client.client.attempts == 2
 
 
 def test_pick_package_resources_nao_funde_arquivos_de_mesmo_name() -> None:

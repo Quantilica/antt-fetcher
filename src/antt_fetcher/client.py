@@ -8,13 +8,22 @@ from pathlib import Path
 from typing import Any
 
 from quantilica.core.ckan import CkanClient
-from quantilica.core.http import HttpClient
+from quantilica.core.http import HttpClient, resolve_verify_from_env
 from quantilica.core.logging import get_logger
-from quantilica.core.manifests import DownloadManifest
+from quantilica.core.storage import ExpectedFormat, expected_format_for_path
 
 from .constants import ANTT_CKAN_URL
 
 logger = get_logger(__name__)
+
+
+def _default_http_client() -> HttpClient:
+    """Cliente padrão do host (``QUANTILICA_HTTP_*``, SSL, CA), com plano B do core."""
+    try:
+        from quantilica.cli.sdk import default_client
+    except ImportError:  # CLI autônoma, sem o host instalado
+        return HttpClient(verify=resolve_verify_from_env(), emulate_browser=True)
+    return default_client()
 
 
 class AnttClient:
@@ -28,7 +37,7 @@ class AnttClient:
         logger: logging.Logger | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
-        self.client = client or HttpClient(timeout=120.0)
+        self.client = client or _default_http_client()
         self.logger = logger or get_logger(__name__)
         self.ckan = CkanClient(base_url, client=self.client, logger=self.logger)
 
@@ -80,24 +89,28 @@ class AnttClient:
         url: str,
         dest: Path,
         *,
-        manifest_path: Path | None = None,
-    ) -> DownloadManifest:
-        """Download single resource with manifest sidecar and WAF validation."""
-        manifest = self.client.download_with_manifest(
+        dataset_id: str,
+        source_id: str = "antt",
+        producer: str = "antt-fetcher",
+        force: bool = False,
+        expected_format: ExpectedFormat | None = None,
+    ) -> Path:
+        """Baixa um recurso com manifesto lateral (``<dest>.manifest.json``).
+
+        O formato esperado sai da extensão de ``dest`` quando não é informado, e
+        a assinatura do conteúdo é conferida antes de gravar: página de erro ou de
+        bloqueio do WAF com HTTP 200 levanta ``CorruptPayloadError`` e não deixa
+        arquivo nem manifesto.
+
+        Returns:
+            Path: O caminho do arquivo baixado (ou já em dia).
+        """
+        return self.client.download_with_manifest(
             url,
             dest,
-            manifest_path=manifest_path,
+            source_id=source_id,
+            dataset_id=dataset_id,
+            producer=producer,
+            force=force,
+            expected_format=expected_format or expected_format_for_path(dest),
         )
-
-        # Validate that response was not an HTML error or WAF rejection
-        if dest.exists() and dest.stat().st_size < 10000:
-            sample = dest.read_bytes().lower()
-            if b"<html" in sample or b"request rejected" in sample:
-                dest.unlink(missing_ok=True)
-                if manifest_path and manifest_path.exists():
-                    manifest_path.unlink(missing_ok=True)
-                raise ValueError(
-                    f"Download rejeitado pelo WAF ou devolveu HTML de erro: {url}"
-                )
-
-        return manifest
