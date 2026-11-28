@@ -19,6 +19,7 @@ import logging
 import re
 import unicodedata
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from typing import Any
 
 from . import (
@@ -34,7 +35,7 @@ from . import (
 )
 from ._catalog_base import AnttDataset, DatasetEntry, GroupInfo
 from .client import AnttClient
-from .constants import DATASETS_BY_GROUP
+from .constants import ANTT_CKAN_URL, DATASETS_BY_GROUP
 
 __all__ = [
     "DatasetEntry",
@@ -46,7 +47,9 @@ __all__ = [
     "CATALOG",
     "catalog_rows",
     "expand_group",
+    "group_failure_records",
     "group_failures",
+    "DiscoveryFailure",
     "list_datasets",
     "resolve_govbr_url",
 ]
@@ -72,6 +75,21 @@ CATALOG: dict[str, AnttDataset] = {
     ds.slug: ds for mod in _MODULES for ds in mod.DATASETS
 }
 
+
+@dataclass(frozen=True)
+class DiscoveryFailure:
+    """Uma falha de descoberta: o pacote (ou página) e a causa."""
+
+    item: str
+    error_class: str
+    error: str
+    url: str = ""
+
+    def __str__(self) -> str:
+        causa = f"{self.error_class}: {self.error}" if self.error_class else self.error
+        return f"{self.item}: {causa}"
+
+
 # Chamadas simultâneas ao CKAN na descoberta (o portal fica atrás de um WAF).
 CKAN_WORKERS = 4
 _FORMATOS = {"CSV", "JSON", "ZIP", "PARQUET"}
@@ -80,7 +98,7 @@ _FORMATOS = {"CSV", "JSON", "ZIP", "PARQUET"}
 _CACHE: dict[str, list[dict[str, Any]]] = {}
 # grupo -> falhas de descoberta da última listagem (``item: causa``). Vazio quando a
 # descoberta do grupo deu certo. Fica fora do ``_CACHE`` de propósito.
-_FAILURES: dict[str, list[str]] = {}
+_FAILURES: dict[str, list[DiscoveryFailure]] = {}
 _GOVBR_XLSX_RE = re.compile(r'href="([^"]+origem-destino[^"]*\.xlsx)"', re.IGNORECASE)
 
 
@@ -138,7 +156,9 @@ def _resource_size(resource: dict[str, Any]) -> int | None:
 
 
 def _show_packages(
-    client: AnttClient, slugs: list[str], failures: list[str] | None = None
+    client: AnttClient,
+    slugs: list[str],
+    failures: list[DiscoveryFailure] | None = None,
 ) -> dict[str, dict[str, Any] | None]:
     """``package_show`` de vários pacotes em paralelo (o CKAN leva ~6 s por chamada).
 
@@ -155,7 +175,14 @@ def _show_packages(
         except Exception as exc:  # noqa: BLE001 - pacote removido não derruba o grupo
             logger.warning("Pacote %s indisponível no CKAN: %s", slug, exc)
             if failures is not None:
-                failures.append(f"{slug}: {type(exc).__name__}: {exc}")
+                failures.append(
+                    DiscoveryFailure(
+                        slug,
+                        type(exc).__name__,
+                        str(exc),
+                        f"{ANTT_CKAN_URL}/dataset/{slug}",
+                    )
+                )
             return None
 
     if len(slugs) <= 1:
@@ -164,7 +191,9 @@ def _show_packages(
         return dict(zip(slugs, pool.map(one, slugs), strict=True))
 
 
-def _govbr_entries(failures: list[str] | None = None) -> list[dict[str, Any]]:
+def _govbr_entries(
+    failures: list[DiscoveryFailure] | None = None,
+) -> list[dict[str, Any]]:
     """Entrada do XLSX do gov.br, com a URL resolvida pela página.
 
     Página fora do ar ou sem o link do XLSX é falha de descoberta (vai a
@@ -178,12 +207,21 @@ def _govbr_entries(failures: list[str] | None = None) -> list[dict[str, Any]]:
         except Exception as exc:  # noqa: BLE001 - gov.br fora do ar não derruba o grupo
             logger.warning("gov.br indisponível (%s): %s", page, exc)
             if failures is not None:
-                failures.append(f"{slug}: {type(exc).__name__}: {exc}")
+                failures.append(
+                    DiscoveryFailure(slug, type(exc).__name__, str(exc), page)
+                )
             continue
         if not url:
             logger.warning("XLSX origem-destino não encontrado em %s", page)
             if failures is not None:
-                failures.append(f"{slug}: XLSX origem-destino não encontrado em {page}")
+                failures.append(
+                    DiscoveryFailure(
+                        slug,
+                        "",
+                        f"XLSX origem-destino não encontrado em {page}",
+                        page,
+                    )
+                )
             continue
         entries.append(
             DatasetEntry(
@@ -206,17 +244,22 @@ def group_failures(group: str) -> list[str]:
     grupo nunca foi listado). Um grupo só de catálogo (sem pacote para baixar)
     nunca tem falha.
     """
-    failures: list[str] = []
+    return [str(f) for f in group_failure_records(group)]
+
+
+def group_failure_records(group: str) -> list[DiscoveryFailure]:
+    """Como :func:`group_failures`, com o pacote, a classe e a causa em campos."""
+    records: list[DiscoveryFailure] = []
     for canon in expand_group(group):
-        failures.extend(_FAILURES.get(canon, []))
-    return failures
+        records.extend(_FAILURES.get(canon, []))
+    return records
 
 
 def _entries_for_group(group: str) -> list[dict[str, Any]]:
     """Expande os pacotes R1 do grupo em uma entrada por recurso."""
     if group in _CACHE:
         return _CACHE[group]
-    failures: list[str] = []
+    failures: list[DiscoveryFailure] = []
     if group == "govbr":
         entries = _govbr_entries(failures)
         _remember(group, entries, failures)
@@ -270,7 +313,9 @@ def _entries_for_group(group: str) -> list[dict[str, Any]]:
     return entries
 
 
-def _remember(group: str, entries: list[dict[str, Any]], failures: list[str]) -> None:
+def _remember(
+    group: str, entries: list[dict[str, Any]], failures: list[DiscoveryFailure]
+) -> None:
     """Guarda o resultado da descoberta do grupo.
 
     Só a descoberta completa vai ao ``_CACHE``; com falha, as falhas ficam em
@@ -284,7 +329,7 @@ def _remember(group: str, entries: list[dict[str, Any]], failures: list[str]) ->
             "ANTT: descoberta do grupo %s incompleta (%d falha(s)): %s",
             group,
             len(failures),
-            "; ".join(failures[:5]),
+            "; ".join(str(f) for f in failures[:5]),
         )
     else:
         _FAILURES.pop(group, None)

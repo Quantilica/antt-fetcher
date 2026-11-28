@@ -75,7 +75,7 @@ def test_manifesto_de_outra_url_no_mesmo_caminho_nao_vale(
     assert item.reason == "ckan-not-present"
     assert item.local_path == str(tmp_path / "rodovias" / "volume-radar@20260628.csv")
     assert item.remote_size == 100
-    assert item.remote_last_modified is None
+    assert item.remote_last_modified == "2026-06-28T16:01:55+00:00"
 
 
 def test_tamanho_diferente_baixa(tmp_path: Path, no_head: list[str]) -> None:
@@ -227,3 +227,18 @@ def test_tamanho_diferente_continua_sendo_ckan_changed(
         tmp_path, "volume-radar@20260101.csv", URL_A, 90, "2026-12-01T00:00:00+00:00"
     )
     assert fetcher.check_entry(_entry(), tmp_path).reason == "ckan-changed"
+
+
+def test_item_do_plano_traz_o_momento_do_ckan_em_utc(
+    tmp_path: Path, no_head: list[str]
+) -> None:
+    """O reclassificador compara ``remote_last_modified`` com o da versão guardada."""
+    novo = fetcher.check_entry(
+        _entry(remote_modified="2026-06-28T16:01:55.5"), tmp_path / "a"
+    )
+    assert novo.action == "download"
+    assert novo.remote_last_modified == "2026-06-28T16:01:55.500000+00:00"
+    _sidecar(tmp_path / "b", "volume-radar@20260628.csv", URL_A, 100)
+    fresco = fetcher.check_entry(_entry(), tmp_path / "b")
+    assert fresco.action == "skip-up-to-date"
+    assert fresco.remote_last_modified == "2026-06-28T16:01:55+00:00"

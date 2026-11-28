@@ -196,17 +196,97 @@ def test_erro_cita_so_as_primeiras_causas(tmp_path: Path) -> None:
     assert "(+3 falha(s))" in msg
 
 
-def test_check_com_falha_de_descoberta_sai_1_e_nao_grava_plano(
-    tmp_path: Path,
-) -> None:
-    """Modo de plano: sem isto o ``check`` saía 0 e o ``sync --from-plan`` também."""
+def _check(tmp_path: Path, *grupos: str):
     plano = tmp_path / "plano.json"
     res = runner.invoke(
-        app, ["check", "rodovias", "-o", str(tmp_path / "bruto"), "--out", str(plano)]
+        app,
+        ["check", *grupos, "-o", str(tmp_path / "bruto"), "--out", str(plano)],
     )
-    assert res.exit_code == 1
-    assert not plano.exists()
-    assert fetcher._falhas_descoberta == {}  # consumidas
+    return res, plano
+
+
+def _sync_do_plano(tmp_path: Path, plano: Path):
+    """Segundo processo: estado limpo, sem listagem (só o plano)."""
+    catalog._CACHE.clear()
+    catalog._FAILURES.clear()
+    fetcher._falhas_descoberta.clear()
+    resumo = tmp_path / "resumo.json"
+    res = runner.invoke(
+        app,
+        [
+            "sync",
+            "--from-plan",
+            str(plano),
+            "-o",
+            str(tmp_path / "bruto"),
+            "--summary-json",
+            str(resumo),
+        ],
+    )
+    return res, json.loads(resumo.read_text())
+
+
+def test_check_com_falha_de_descoberta_sai_0_e_grava_o_item_no_plano(
+    tmp_path: Path, ckan_falso: dict[str, Any]
+) -> None:
+    """A falha vira ``skip-unavailable``/``listing-error``; o plano dos demais fica."""
+    res, plano = _check(tmp_path, "rodovias")
+    assert res.exit_code == 0, res.output
+    itens = json.loads(plano.read_text())["items"]
+    por_acao = {i["id"]: i for i in itens}
+    erro = por_acao["listing-error:rodovias:pacote-fora"]
+    assert erro["action"] == "skip-unavailable"
+    assert erro["reason"] == "listing-error"
+    assert erro["dataset"] == "rodovias"
+    assert erro["entry"]["error_class"] == "RuntimeError"
+    assert "503" in erro["entry"]["error"]
+    assert erro["url"].endswith("/dataset/pacote-fora")
+    baixar = [i for i in itens if i["action"] == "download"]
+    assert [i["entry"]["slug"] for i in baixar] == ["pacote-bom"]
+    assert fetcher._falhas_descoberta == {}  # o check não deixa pendência
+
+
+def test_check_plano_e_sync_from_plan_saem_3_com_o_erro(
+    tmp_path: Path, download_simulado: list[str]
+) -> None:
+    res, plano = _check(tmp_path, "rodovias")
+    assert res.exit_code == 0
+    res, resumo = _sync_do_plano(tmp_path, plano)
+    assert res.exit_code == 3, res.output
+    assert len(download_simulado) == 1  # o pacote bom baixou
+    (erro,) = resumo["errors"]
+    assert erro["id"] == "listing-error:rodovias:pacote-fora"
+    assert erro["message"].startswith("RuntimeError: ")
+    assert "503" in erro["message"]
+    assert resumo["failed"] == 1
+
+
+def test_check_plano_e_sync_from_plan_saem_1_se_nada_baixa(tmp_path: Path) -> None:
+    """``cargas`` só tem o pacote que falha: o plano tem só o item de erro."""
+    res, plano = _check(tmp_path, "cargas")
+    assert res.exit_code == 0, res.output
+    itens = json.loads(plano.read_text())["items"]
+    assert [i["action"] for i in itens] == ["skip-unavailable"]
+    res, resumo = _sync_do_plano(tmp_path, plano)
+    assert res.exit_code == 1, res.output
+    assert [e["id"] for e in resumo["errors"]] == ["listing-error:cargas:pacote-fora"]
+
+
+def test_sync_direto_continua_com_o_erro_descoberta_do_grupo(tmp_path: Path) -> None:
+    """Só o ``check`` tolera: no ``sync`` direto a sentinela não é baixada."""
+    res, resumo = _sync(tmp_path, "rodovias")
+    assert res.exit_code == 3
+    assert [e["id"] for e in resumo["errors"]] == ["descoberta:rodovias"]
+
+
+def test_tolerancia_so_vale_dentro_do_check(tmp_path: Path) -> None:
+    from antt_fetcher import plugin
+
+    assert plugin._TOLERANT_LISTING is False
+    _check(tmp_path, "rodovias")
+    assert plugin._TOLERANT_LISTING is False  # restaurada
+    entradas = fetcher.listar_grupo("rodovias")
+    assert all(e.get("type") != "listing-error" for e in entradas)
 
 
 def test_check_sem_falha_grava_o_plano(

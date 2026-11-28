@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import functools
 import json
 import logging
 import threading
@@ -11,7 +12,7 @@ from typing import Any
 
 import typer
 from quantilica.cli.sdk import (
-    CheckPlan,
+    LISTING_ERROR_REASON,
     CheckPlanItem,
     FetcherApp,
     make_resolve_groups,
@@ -25,7 +26,7 @@ from .catalog import (
     GROUPS,
     catalog_rows,
     expand_group,
-    group_failures,
+    group_failure_records,
     list_datasets,
 )
 from .storage import DataRepository
@@ -38,6 +39,13 @@ logger = logging.getLogger(__name__)
 EXPECTED_EMPTY_GROUPS = ("ouvidoria", "tecnologia", "visualizacoes")
 # Quantas causas a mensagem de erro de um grupo cita (o log traz todas).
 MAX_CAUSAS_NO_ERRO = 5
+
+LISTING_ERROR_TYPE = "listing-error"
+# Verdadeiro só dentro do ``check`` (ver ``_tolerar_falha_de_descoberta``): lá cada
+# pacote cuja descoberta falhou vira uma entrada sentinela, que o ``check_entry``
+# devolve como ``skip-unavailable``/``listing-error``. No ``sync`` direto a falha
+# vira o erro ``descoberta:<grupo>`` do ``download_datasets``.
+_TOLERANT_LISTING = False
 
 
 def _out(text: str) -> None:
@@ -61,8 +69,13 @@ class AnttApp(FetcherApp):
     """``FetcherApp`` da ANTT.
 
     Faz a falha de descoberta (``package_show`` que falha, página do gov.br fora do
-    ar ou sem o link) contar como erro do ``sync``: sem isso o pacote sumia da lista
-    só com um aviso e o ``sync`` saía 0 com menos arquivos, ou com nenhum.
+    ar ou sem o link) aparecer: sem isso o pacote sumia da lista só com um aviso e
+    o ``sync`` saía 0 com menos arquivos, ou com nenhum.
+
+    - ``sync`` direto: soma ao resultado um erro ``descoberta:<grupo>`` com as causas.
+    - ``check``: cada falha vira um item ``skip-unavailable``/``listing-error`` do
+      plano (o ``check`` sai 0 e grava o plano dos demais); o ``sync --from-plan``
+      do host conta o item como erro.
     """
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
@@ -72,43 +85,20 @@ class AnttApp(FetcherApp):
         self.list_datasets = self.listar_grupo
 
     def listar_grupo(self, group: str) -> list[dict[str, Any]]:
-        """``list_datasets`` que anota as falhas de descoberta do grupo pedido."""
+        """``list_datasets`` que registra as falhas de descoberta do grupo pedido."""
         entries = list_datasets(group)
         for canon in expand_group(group):
-            falhas = group_failures(canon)
-            if falhas:
-                self._falhas_descoberta[canon] = falhas
-                for falha in falhas:
-                    logger.error(
-                        "ANTT: descoberta do grupo %s falhou: %s", canon, falha
-                    )
-            else:
+            registros = group_failure_records(canon)
+            if not registros:
                 self._falhas_descoberta.pop(canon, None)
+                continue
+            for registro in registros:
+                logger.error("ANTT: descoberta do grupo %s falhou: %s", canon, registro)
+            if _TOLERANT_LISTING:
+                entries = [*entries, *(_sentinela(canon, r) for r in registros)]
+            else:
+                self._falhas_descoberta[canon] = [str(r) for r in registros]
         return entries
-
-    def check_datasets(
-        self,
-        entries: list[dict[str, Any]],
-        output_dir: Path,
-        workers: int = 4,
-    ) -> CheckPlan:
-        """Verifica o frescor; com falha de descoberta num grupo pedido, sai 1.
-
-        Na coleta em modo de plano o ``check`` e o ``sync --from-plan`` são
-        processos separados, e o segundo não lista grupo: a falha de descoberta só
-        chega ao código de saída se o ``check`` falhar (e então nenhum plano é
-        gravado). Sem plano, o ``sync`` completo conta ``descoberta:<grupo>``.
-        """
-        falhas, self._falhas_descoberta = self._falhas_descoberta, {}
-        if falhas:
-            for grupo, causas in sorted(falhas.items()):
-                logger.error(
-                    "ANTT: check abortado, descoberta do grupo %s falhou: %s",
-                    grupo,
-                    "; ".join(causas),
-                )
-            raise typer.Exit(1)
-        return super().check_datasets(entries, output_dir, workers)
 
     def download_datasets(
         self,
@@ -133,6 +123,19 @@ class AnttApp(FetcherApp):
             for grupo, causas in sorted(falhas.items())
         ]
         return downloaded, total + len(erros_descoberta), errors + erros_descoberta
+
+
+def _sentinela(grupo: str, falha: Any) -> dict[str, Any]:
+    """Entrada sentinela de uma descoberta que falhou (vai ao plano do ``check``)."""
+    return {
+        "id": f"{LISTING_ERROR_TYPE}:{grupo}:{falha.item}",
+        "group": grupo,
+        "dataset": grupo,
+        "url": falha.url,
+        "type": LISTING_ERROR_TYPE,
+        "error": falha.error,
+        "error_class": falha.error_class,
+    }
 
 
 def _resumir_causas(causas: list[str]) -> str:
@@ -235,6 +238,23 @@ def _antt_check_entry(entry: dict[str, Any], output_dir: Path) -> CheckPlanItem:
     rebaixado. Sem ``fetched_at`` no manifesto a data não pode ser comparada e
     vale o tamanho. Sem validadores, cai no check do SDK (HEAD).
     """
+    if entry.get("type") == LISTING_ERROR_TYPE:
+        # Sobrevive à reclassificação do plano (``skip-unavailable`` é mantido) e é
+        # contado como erro pelo ``sync --from-plan``.
+        return CheckPlanItem(
+            dataset=str(entry.get("group") or "datasets"),
+            id=str(entry.get("id", "unknown")),
+            url=str(entry.get("url", "")),
+            partition=None,
+            local_path="",
+            remote_etag=None,
+            remote_last_modified=None,
+            remote_size=None,
+            local_exists=False,
+            action="skip-unavailable",
+            reason=LISTING_ERROR_REASON,
+            entry=dict(entry),
+        )
     validators = _ckan_validators(entry)
     if validators is None:
         return FetcherApp.check_entry(fetcher, entry, output_dir)
@@ -263,7 +283,11 @@ def _antt_check_entry(entry: dict[str, Any], output_dir: Path) -> CheckPlanItem:
         partition=None,
         local_path=str(local),
         remote_etag=None,
-        remote_last_modified=None,
+        # Momento do CKAN em UTC: a regra do reclassificador que compara o tamanho
+        # com o da versão guardada só dá "em dia" se o ``last_modified`` da versão
+        # não for anterior a ele; sem isto, um reenvio de mesmo tamanho no mesmo
+        # dia era desfeito pelo reclassificador.
+        remote_last_modified=moment.isoformat(),
         remote_size=size,
         local_exists=exists,
         action=action,
@@ -273,6 +297,34 @@ def _antt_check_entry(entry: dict[str, Any], output_dir: Path) -> CheckPlanItem:
 
 
 fetcher.check_entry = _antt_check_entry  # type: ignore[method-assign]
+
+
+def _tolerar_falha_de_descoberta(callback: Any) -> Any:
+    """Roda o ``check`` do host com a falha de descoberta tolerada.
+
+    O ``check`` é a primeira etapa da coleta em modo de plano: se um pacote que
+    responde 404 para sempre derrubasse o ``check``, não haveria plano e a coleta
+    cairia no ``sync`` completo (milhares de requisições ao portal, todo dia). Com a
+    tolerância, a falha vira um item ``skip-unavailable``/``listing-error`` e uma
+    linha ERROR no log; o plano dos demais pacotes é gravado e o
+    ``sync --from-plan`` conta a falha nos erros (saída 3 ou 1).
+    """
+
+    @functools.wraps(callback)
+    def _wrapper(*args: Any, **kwargs: Any) -> Any:
+        global _TOLERANT_LISTING
+        anterior, _TOLERANT_LISTING = _TOLERANT_LISTING, True
+        try:
+            return callback(*args, **kwargs)
+        finally:
+            _TOLERANT_LISTING = anterior
+
+    return _wrapper
+
+
+for _info in fetcher.app.registered_commands:
+    if _info.name == "check" and _info.callback is not None:
+        _info.callback = _tolerar_falha_de_descoberta(_info.callback)
 
 
 def convert(
