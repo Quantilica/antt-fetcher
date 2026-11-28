@@ -33,8 +33,10 @@ def fake_ckan(monkeypatch: pytest.MonkeyPatch) -> None:
             "passageiros": [],
             "ferrovias": [],
             "fiscalizacao": [],
+            "govbr": [],
         },
     )
+    monkeypatch.setattr(catalog, "_FAILURES", {})
 
 
 def test_cli_list() -> None:

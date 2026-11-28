@@ -164,3 +164,66 @@ def test_descoberta_paralela_mantem_ordem_e_carrega_validadores(
     assert len(threads) > 1
     assert entries[0]["remote_size"] == 123
     assert entries[0]["remote_modified"] == "2026-05-01T10:00:00.5"
+
+
+def _sidecar_com_data(
+    out: Path, name: str, url: str, size: int, fetched_at: str | None
+) -> Path:
+    target = out / "rodovias" / name
+    target.parent.mkdir(parents=True, exist_ok=True)
+    data: dict[str, Any] = {"url": url, "size_bytes": size}
+    if fetched_at is not None:
+        data["fetched_at"] = fetched_at
+    Path(f"{target}.manifest.json").write_text(json.dumps(data), encoding="utf-8")
+    return target
+
+
+def test_mesmo_tamanho_mas_ckan_modificado_depois_do_download_baixa(
+    tmp_path: Path, no_head: list[str]
+) -> None:
+    """Arquivo corrigido com o mesmo número de bytes: o ``last_modified`` entrega."""
+    _sidecar_com_data(
+        tmp_path, "volume-radar@20260601.csv", URL_A, 100, "2026-06-01T03:00:00+00:00"
+    )
+    # _entry(): remote_modified 2026-06-28, bem depois do download de 06-01.
+    item = fetcher.check_entry(_entry(), tmp_path)
+    assert item.action == "download"
+    assert item.reason == "ckan-modified-after-download"
+    assert item.local_exists is True
+    assert item.remote_size == 100
+    assert not no_head
+
+
+def test_mesmo_tamanho_e_ckan_anterior_ao_download_continua_fresco(
+    tmp_path: Path, no_head: list[str]
+) -> None:
+    target = _sidecar_com_data(
+        tmp_path, "volume-radar@20260628.csv", URL_A, 100, "2026-06-29T03:00:00+00:00"
+    )
+    item = fetcher.check_entry(_entry(), tmp_path)
+    assert item.action == "skip-up-to-date"
+    assert item.reason == "ckan-fresh"
+    assert item.local_path == str(target)
+
+
+def test_manifesto_sem_data_de_download_vale_o_tamanho(
+    tmp_path: Path, no_head: list[str]
+) -> None:
+    _sidecar_com_data(tmp_path, "volume-radar@20260101.csv", URL_A, 100, None)
+    assert fetcher.check_entry(_entry(), tmp_path).action == "skip-up-to-date"
+
+
+def test_data_de_download_ilegivel_vale_o_tamanho(
+    tmp_path: Path, no_head: list[str]
+) -> None:
+    _sidecar_com_data(tmp_path, "volume-radar@20260101.csv", URL_A, 100, "ontem")
+    assert fetcher.check_entry(_entry(), tmp_path).action == "skip-up-to-date"
+
+
+def test_tamanho_diferente_continua_sendo_ckan_changed(
+    tmp_path: Path, no_head: list[str]
+) -> None:
+    _sidecar_com_data(
+        tmp_path, "volume-radar@20260101.csv", URL_A, 90, "2026-12-01T00:00:00+00:00"
+    )
+    assert fetcher.check_entry(_entry(), tmp_path).reason == "ckan-changed"

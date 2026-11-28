@@ -4,20 +4,40 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import logging
 import threading
 from pathlib import Path
 from typing import Any
 
 import typer
-from quantilica.cli.sdk import CheckPlanItem, FetcherApp, make_resolve_groups
+from quantilica.cli.sdk import (
+    CheckPlan,
+    CheckPlanItem,
+    FetcherApp,
+    make_resolve_groups,
+)
 from quantilica.cli.ui import get_console
 from quantilica.core.registry import FetcherInfo
 from quantilica.core.sync import FreshnessPolicy
 
-from .catalog import GROUP_ALIASES, GROUPS, catalog_rows, list_datasets
+from .catalog import (
+    GROUP_ALIASES,
+    GROUPS,
+    catalog_rows,
+    expand_group,
+    group_failures,
+    list_datasets,
+)
 from .storage import DataRepository
 
 console = get_console()
+logger = logging.getLogger(__name__)
+
+# Grupos só de catálogo (sem pacote para baixar): vazios por desenho. ``govbr`` e os
+# grupos que baixam ficam de fora: se esvaziarem, é falha da fonte.
+EXPECTED_EMPTY_GROUPS = ("ouvidoria", "tecnologia", "visualizacoes")
+# Quantas causas a mensagem de erro de um grupo cita (o log traz todas).
+MAX_CAUSAS_NO_ERRO = 5
 
 
 def _out(text: str) -> None:
@@ -37,7 +57,92 @@ def path_builder(
     return DataRepository(output_dir).path_for_entry(entry, last_modified=last_modified)
 
 
-fetcher = FetcherApp(
+class AnttApp(FetcherApp):
+    """``FetcherApp`` da ANTT.
+
+    Faz a falha de descoberta (``package_show`` que falha, página do gov.br fora do
+    ar ou sem o link) contar como erro do ``sync``: sem isso o pacote sumia da lista
+    só com um aviso e o ``sync`` saía 0 com menos arquivos, ou com nenhum.
+    """
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        #: grupo -> falhas de descoberta vistas ao listar os grupos pedidos.
+        self._falhas_descoberta: dict[str, list[str]] = {}
+        self.list_datasets = self.listar_grupo
+
+    def listar_grupo(self, group: str) -> list[dict[str, Any]]:
+        """``list_datasets`` que anota as falhas de descoberta do grupo pedido."""
+        entries = list_datasets(group)
+        for canon in expand_group(group):
+            falhas = group_failures(canon)
+            if falhas:
+                self._falhas_descoberta[canon] = falhas
+                for falha in falhas:
+                    logger.error(
+                        "ANTT: descoberta do grupo %s falhou: %s", canon, falha
+                    )
+            else:
+                self._falhas_descoberta.pop(canon, None)
+        return entries
+
+    def check_datasets(
+        self,
+        entries: list[dict[str, Any]],
+        output_dir: Path,
+        workers: int = 4,
+    ) -> CheckPlan:
+        """Verifica o frescor; com falha de descoberta num grupo pedido, sai 1.
+
+        Na coleta em modo de plano o ``check`` e o ``sync --from-plan`` são
+        processos separados, e o segundo não lista grupo: a falha de descoberta só
+        chega ao código de saída se o ``check`` falhar (e então nenhum plano é
+        gravado). Sem plano, o ``sync`` completo conta ``descoberta:<grupo>``.
+        """
+        falhas, self._falhas_descoberta = self._falhas_descoberta, {}
+        if falhas:
+            for grupo, causas in sorted(falhas.items()):
+                logger.error(
+                    "ANTT: check abortado, descoberta do grupo %s falhou: %s",
+                    grupo,
+                    "; ".join(causas),
+                )
+            raise typer.Exit(1)
+        return super().check_datasets(entries, output_dir, workers)
+
+    def download_datasets(
+        self,
+        entries: list[dict[str, Any]],
+        output_dir: Path,
+        workers: int = 4,
+        *,
+        force: bool = False,
+    ) -> tuple[int, int, list[tuple[str, str]]]:
+        """Baixa as entradas e soma, aos erros, as falhas de descoberta pendentes.
+
+        Cada grupo com falha de descoberta entra como um erro ``descoberta:<grupo>``
+        com as causas: o ``sync`` sai 3 (algo baixou) ou 1 (nada baixou) e o
+        ``--summary-json`` traz o grupo e a causa.
+        """
+        falhas, self._falhas_descoberta = self._falhas_descoberta, {}
+        downloaded, total, errors = super().download_datasets(
+            entries, output_dir, workers, force=force
+        )
+        erros_descoberta = [
+            (f"descoberta:{grupo}", _resumir_causas(causas))
+            for grupo, causas in sorted(falhas.items())
+        ]
+        return downloaded, total + len(erros_descoberta), errors + erros_descoberta
+
+
+def _resumir_causas(causas: list[str]) -> str:
+    """As primeiras causas, separadas por ``; ``, e quantas ficaram de fora."""
+    texto = "; ".join(causas[:MAX_CAUSAS_NO_ERRO])
+    resto = len(causas) - MAX_CAUSAS_NO_ERRO
+    return f"{texto}; (+{resto} falha(s))" if resto > 0 else texto
+
+
+fetcher = AnttApp(
     name="antt",
     help="Coletor e conversor Lake Hive de dados abertos da ANTT",
     info=FetcherInfo(
@@ -55,6 +160,7 @@ fetcher = FetcherApp(
     path_builder=path_builder,
     default_output=Path("/data/antt"),
     freshness_policy=FreshnessPolicy.HEAD_FALLBACK_GET,
+    expected_empty_groups=EXPECTED_EMPTY_GROUPS,
 )
 
 
@@ -73,14 +179,27 @@ def _ckan_validators(entry: dict[str, Any]) -> tuple[int, dt.datetime] | None:
 
 
 _index_lock = threading.Lock()
-_index_cache: dict[tuple[str, str], dict[str, tuple[int, Path]]] = {}
+_IndexEntry = tuple[int, Path, dt.datetime | None]
+_index_cache: dict[tuple[str, str], dict[str, _IndexEntry]] = {}
 
 
-def _local_index(output_dir: Path, group: str) -> dict[str, tuple[int, Path]]:
-    """``url -> (tamanho, caminho do bruto)`` lido dos manifestos do grupo.
+def _parse_moment(raw: Any) -> dt.datetime | None:
+    """ISO 8601 em UTC (sem fuso vale UTC), ou ``None`` se ausente ou ilegível."""
+    try:
+        moment = dt.datetime.fromisoformat(str(raw))
+    except ValueError:
+        return None
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=dt.UTC)
+    return moment.astimezone(dt.UTC)
+
+
+def _local_index(output_dir: Path, group: str) -> dict[str, _IndexEntry]:
+    """``url -> (tamanho, caminho do bruto, momento do download)`` dos manifestos.
 
     Um manifesto por arquivo baixado; o bruto pode já ter sido removido pelo
-    ingest, mas o manifesto fica (o SDK trata como "manifest-fresh"). Montado
+    ingest, mas o manifesto fica (o SDK trata como "manifest-fresh"). O momento
+    do download é o ``fetched_at`` do manifesto (``None`` se faltar). Montado
     uma vez por (pasta, grupo) e processo: o ``check`` roda em um processo só.
     """
     key = (str(output_dir), group)
@@ -97,6 +216,7 @@ def _local_index(output_dir: Path, group: str) -> dict[str, tuple[int, Path]]:
                 index[url] = (
                     size,
                     sidecar.with_name(sidecar.name[: -len(".manifest.json")]),
+                    _parse_moment(data.get("fetched_at")),
                 )
             _index_cache[key] = index
         return index
@@ -107,9 +227,13 @@ def _antt_check_entry(entry: dict[str, Any], output_dir: Path) -> CheckPlanItem:
 
     O HEAD do portal leva ~20 s por recurso em horário de carga (1453 entradas
     por rodada). Com ``remote_size`` e ``remote_modified`` na entrada, vale o
-    manifesto local da mesma URL: tamanho igual é ``skip-up-to-date``; senão é
-    ``download``, e o caminho usa a data do CKAN (o download recalcula o
-    carimbo pelo ``Last-Modified``). Sem validadores, cai no check do SDK (HEAD).
+    manifesto local da mesma URL: tamanho igual **e** ``last_modified`` do CKAN
+    não posterior ao download é ``skip-up-to-date``; senão é ``download``, e o
+    caminho usa a data do CKAN (o download recalcula o carimbo pelo
+    ``Last-Modified``). Só o tamanho não basta: um arquivo corrigido com o mesmo
+    número de bytes mudaria o ``last_modified`` do recurso e nunca seria
+    rebaixado. Sem ``fetched_at`` no manifesto a data não pode ser comparada e
+    vale o tamanho. Sem validadores, cai no check do SDK (HEAD).
     """
     validators = _ckan_validators(entry)
     if validators is None:
@@ -117,13 +241,21 @@ def _antt_check_entry(entry: dict[str, Any], output_dir: Path) -> CheckPlanItem:
     size, moment = validators
     group = str(entry.get("group") or "default")
     known = _local_index(output_dir, group).get(str(entry["url"]))
-    if known is not None and known[0] == size:
+    modified_after_download = (
+        known is not None and known[2] is not None and moment > known[2]
+    )
+    if known is not None and known[0] == size and not modified_after_download:
         local, action, reason, exists = known[1], "skip-up-to-date", "ckan-fresh", True
     else:
         local = path_builder(output_dir, entry, moment.date())
         exists = known is not None
         action = "download"
-        reason = "ckan-changed" if exists else "ckan-not-present"
+        if not exists:
+            reason = "ckan-not-present"
+        elif known is not None and known[0] != size:
+            reason = "ckan-changed"
+        else:
+            reason = "ckan-modified-after-download"
     return CheckPlanItem(
         dataset=str(entry.get("group") or entry.get("id") or "datasets"),
         id=str(entry.get("id", "unknown")),

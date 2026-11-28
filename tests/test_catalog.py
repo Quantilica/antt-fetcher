@@ -34,6 +34,9 @@ FAKE_RESOURCES = {
 def fake_ckan(monkeypatch: pytest.MonkeyPatch) -> None:
     """Substitui a descoberta CKAN por pacotes fixos e limpa o cache."""
     monkeypatch.setattr(catalog, "_CACHE", {})
+    monkeypatch.setattr(catalog, "_FAILURES", {})
+    # Sem rede: a página do gov.br não é consultada.
+    monkeypatch.setattr(catalog, "_govbr_entries", lambda failures=None: [])
     monkeypatch.setattr(
         catalog,
         "DATASETS_BY_GROUP",

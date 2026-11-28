@@ -46,6 +46,7 @@ __all__ = [
     "CATALOG",
     "catalog_rows",
     "expand_group",
+    "group_failures",
     "list_datasets",
     "resolve_govbr_url",
 ]
@@ -74,7 +75,12 @@ CATALOG: dict[str, AnttDataset] = {
 # Chamadas simultâneas ao CKAN na descoberta (o portal fica atrás de um WAF).
 CKAN_WORKERS = 4
 _FORMATOS = {"CSV", "JSON", "ZIP", "PARQUET"}
+# Só entradas de descoberta completa: um grupo com falha de descoberta nunca entra
+# aqui, para a próxima chamada tentar de novo em vez de repetir o catálogo furado.
 _CACHE: dict[str, list[dict[str, Any]]] = {}
+# grupo -> falhas de descoberta da última listagem (``item: causa``). Vazio quando a
+# descoberta do grupo deu certo. Fica fora do ``_CACHE`` de propósito.
+_FAILURES: dict[str, list[str]] = {}
 _GOVBR_XLSX_RE = re.compile(r'href="([^"]+origem-destino[^"]*\.xlsx)"', re.IGNORECASE)
 
 
@@ -132,13 +138,15 @@ def _resource_size(resource: dict[str, Any]) -> int | None:
 
 
 def _show_packages(
-    client: AnttClient, slugs: list[str]
+    client: AnttClient, slugs: list[str], failures: list[str] | None = None
 ) -> dict[str, dict[str, Any] | None]:
     """``package_show`` de vários pacotes em paralelo (o CKAN leva ~6 s por chamada).
 
     O resultado é indexado por slug; a ordem de uso fica a cargo de quem chama,
     então os ids e a ordem das entradas não dependem do paralelismo. Pacote
-    indisponível vira ``None`` (não derruba o grupo).
+    indisponível vira ``None`` (não derruba os outros do grupo) e, se ``failures``
+    for dado, ganha ali uma linha ``<slug>: <causa>``: quem lista o grupo precisa
+    saber que o catálogo ficou furado.
     """
 
     def one(slug: str) -> dict[str, Any] | None:
@@ -146,6 +154,8 @@ def _show_packages(
             return client.package_show(slug)
         except Exception as exc:  # noqa: BLE001 - pacote removido não derruba o grupo
             logger.warning("Pacote %s indisponível no CKAN: %s", slug, exc)
+            if failures is not None:
+                failures.append(f"{slug}: {type(exc).__name__}: {exc}")
             return None
 
     if len(slugs) <= 1:
@@ -154,8 +164,12 @@ def _show_packages(
         return dict(zip(slugs, pool.map(one, slugs), strict=True))
 
 
-def _govbr_entries() -> list[dict[str, Any]]:
-    """Entrada do XLSX do gov.br, com a URL resolvida pela página."""
+def _govbr_entries(failures: list[str] | None = None) -> list[dict[str, Any]]:
+    """Entrada do XLSX do gov.br, com a URL resolvida pela página.
+
+    Página fora do ar ou sem o link do XLSX é falha de descoberta (vai a
+    ``failures``), não "o conjunto não existe".
+    """
     client = AnttClient()
     entries: list[dict[str, Any]] = []
     for slug, page in catalog_govbr.PAGES.items():
@@ -163,9 +177,13 @@ def _govbr_entries() -> list[dict[str, Any]]:
             url = resolve_govbr_url(client.client.get(page).text)
         except Exception as exc:  # noqa: BLE001 - gov.br fora do ar não derruba o grupo
             logger.warning("gov.br indisponível (%s): %s", page, exc)
+            if failures is not None:
+                failures.append(f"{slug}: {type(exc).__name__}: {exc}")
             continue
         if not url:
             logger.warning("XLSX origem-destino não encontrado em %s", page)
+            if failures is not None:
+                failures.append(f"{slug}: XLSX origem-destino não encontrado em {page}")
             continue
         entries.append(
             DatasetEntry(
@@ -181,19 +199,34 @@ def _govbr_entries() -> list[dict[str, Any]]:
     return entries
 
 
+def group_failures(group: str) -> list[str]:
+    """Falhas de descoberta da última listagem do ``group`` (grupo ou apelido).
+
+    Cada item é ``<pacote>: <causa>``. Vazio quando a descoberta deu certo (ou o
+    grupo nunca foi listado). Um grupo só de catálogo (sem pacote para baixar)
+    nunca tem falha.
+    """
+    failures: list[str] = []
+    for canon in expand_group(group):
+        failures.extend(_FAILURES.get(canon, []))
+    return failures
+
+
 def _entries_for_group(group: str) -> list[dict[str, Any]]:
     """Expande os pacotes R1 do grupo em uma entrada por recurso."""
     if group in _CACHE:
         return _CACHE[group]
+    failures: list[str] = []
     if group == "govbr":
-        _CACHE[group] = _govbr_entries()
-        return _CACHE[group]
+        entries = _govbr_entries(failures)
+        _remember(group, entries, failures)
+        return entries
 
     client = AnttClient()
     entries: list[dict[str, Any]] = []
     seen: set[str] = set()
     slugs = DATASETS_BY_GROUP.get(group, [])
-    packages = _show_packages(client, slugs)
+    packages = _show_packages(client, slugs, failures)
     for package_slug in slugs:
         package = packages.get(package_slug)
         if package is None:
@@ -233,8 +266,29 @@ def _entries_for_group(group: str) -> list[dict[str, Any]]:
                     resource_key=keys.get(index),
                 ).to_dict()
             )
-    _CACHE[group] = entries
+    _remember(group, entries, failures)
     return entries
+
+
+def _remember(group: str, entries: list[dict[str, Any]], failures: list[str]) -> None:
+    """Guarda o resultado da descoberta do grupo.
+
+    Só a descoberta completa vai ao ``_CACHE``; com falha, as falhas ficam em
+    ``_FAILURES`` (para o ``sync`` contá-las como erro) e a próxima listagem tenta
+    de novo.
+    """
+    if failures:
+        _FAILURES[group] = list(failures)
+        _CACHE.pop(group, None)
+        logger.error(
+            "ANTT: descoberta do grupo %s incompleta (%d falha(s)): %s",
+            group,
+            len(failures),
+            "; ".join(failures[:5]),
+        )
+    else:
+        _FAILURES.pop(group, None)
+        _CACHE[group] = entries
 
 
 GROUPS: dict[str, dict[str, Any]] = {

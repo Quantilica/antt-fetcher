@@ -5,6 +5,24 @@ Todas as alterações notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.1.0/),
 e este projeto adere ao [Versionamento Semântico](https://semver.org/lang/pt-BR/).
 
+## [Não lançado]
+
+### Adicionado
+
+- `plugin`: declara `expected_empty_groups` com `ouvidoria`, `tecnologia` e `visualizacoes`, grupos só de catálogo (sem pacote para baixar). Com o `quantilica-cli` 0.30.0, que trata catálogo vazio como erro, eles não geram aviso nem erro. `govbr` e os grupos que baixam seguem falhando se esvaziarem. Exige `quantilica-cli>=0.30.0` no host.
+- `catalog`: `group_failures(grupo)` devolve as falhas de descoberta da última listagem do grupo (`<pacote>: <causa>`).
+
+### Corrigido
+
+- `catalog`/`plugin`: falha de descoberta aparece. Um `package_show` que falhava (CKAN lento ou fora, bloqueio de firewall) virava `None` e o pacote sumia da lista só com um aviso; o mesmo valia para a página do gov.br (fora do ar ou sem o link do XLSX). O `sync` saía 0 com menos arquivos, ou com nenhum. Agora cada pacote que falha entra nas falhas do grupo, a linha de log sai em ERROR com o pacote e a causa, e o `sync` soma ao resultado um erro `descoberta:<grupo>` com as causas (as cinco primeiras e a contagem do resto), visível no `--summary-json`: sai 3 se algo baixou e 1 se nada baixou. Os pacotes que responderam continuam sendo coletados. A falha não vai para o cache de catálogo: a próxima listagem tenta de novo. No modo de plano, o `check` com falha de descoberta num grupo pedido sai 1 e não grava plano (o `sync --from-plan` não lista grupo e não teria como ver a falha).
+- `plugin`: o frescor sem HEAD comparava só o tamanho do recurso com o do manifesto local, e um recurso corrigido com o mesmo número de bytes nunca era rebaixado. Agora, com o `last_modified` do recurso no CKAN (já na entrada) posterior ao `fetched_at` do manifesto, o veredito é `download` com o motivo `ckan-modified-after-download`, mesmo com o tamanho igual. Manifesto sem `fetched_at` legível continua valendo pelo tamanho. O `metadata_modified` não é usado: muda com edição de metadados e não indica troca do arquivo.
+- `client`: `AnttClient.download_resource` chamava `download_with_manifest` com `manifest_path=` e sem `source_id`, `dataset_id` e `producer` (`TypeError` em qualquer chamada real; o teste mockava o método do core). Agora recebe `dataset_id` (obrigatório), `source_id="antt"`, `producer="antt-fetcher"`, `force` e `expected_format` (por padrão, o da extensão do destino), devolve o `Path` baixado, como o core, e deixa a conferência do conteúdo com o core: página de erro ou de bloqueio do WAF com HTTP 200 levanta `CorruptPayloadError` e não deixa arquivo nem manifesto (a conferência manual de HTML própria saiu). Testada com o `download_with_manifest` real sobre transporte simulado. Nada no monorepo a chamava.
+- `client`: o cliente da descoberta (CKAN e página do gov.br) deixa de ser um `HttpClient` próprio e passa a ser o cliente padrão do host, que respeita `QUANTILICA_HTTP_*`, `QUANTILICA_SSL_VERIFY` e o bundle de CA. Sem o host instalado, cai num cliente do core com a verificação TLS lida do ambiente.
+
+### Alterado
+
+- Dependência de desenvolvimento: `quantilica-cli>=0.30.0`.
+
 ## [0.4.2] - 2026-11-25
 
 ### Adicionado
